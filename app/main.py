@@ -14,8 +14,6 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-print("main")
-
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the FastAPI app!"}
