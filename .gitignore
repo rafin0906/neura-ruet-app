@@ -1,0 +1,52 @@
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.env
+
+# Virtual Environment
+venv/
+.env/
+
+# IDE files
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Database
+*.sqlite3
+*.db
+
+# Alembic
+alembic/versions/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Test coverage
+htmlcov/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+
+# pytest
+.cache/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Static files
+staticfiles/
+mediafiles/
+
+# Build
+build/
+dist/
+*.egg-info/
