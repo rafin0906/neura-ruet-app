@@ -14,7 +14,6 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-print("kire")
 
 @app.get("/")
 def read_root():
