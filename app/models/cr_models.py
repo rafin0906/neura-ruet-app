@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from app.models.student import Student
+from app.models.student_models import Student
 
 class CR(Student):
     __tablename__ = "cr"
