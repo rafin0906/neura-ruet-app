@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic_settings import BaseSettings
 
@@ -24,3 +24,21 @@ app = FastAPI()
 def read_root():
     return {"message": "Welcome to the FastAPI app!"}
 
+
+from app.schemas.student_schemas import StudentCreateSchema
+from app.core.database import get_db
+@app.post("/login")
+def login(
+    payload: StudentCreateSchema,
+    db: Session = Depends(get_db)
+):
+    # check duplicate
+    db_student = db.query(Student).filter(
+        Student.neura_id == payload.neura_id
+    ).first()
+    if not db_student:
+        raise HTTPException(400, "Neura ID invalid")
+
+    if db_student.password != payload.password:
+        raise HTTPException(400, "Password invalid")
+    return {"message": "Login successful"}
