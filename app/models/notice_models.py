@@ -11,5 +11,5 @@ class Notice(Base):
     dept = Column(String, nullable=False)
     sec = Column(String, nullable=False)
     series = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    # updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
