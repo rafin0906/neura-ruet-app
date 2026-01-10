@@ -6,7 +6,7 @@ from app.core.database import Base
 class Notice(Base):
     __tablename__ = "notices"
 
-    id = Column(Integer, primary_key=True, index=True)
+    # id = Column(Integer, primary_key=True, index=True)
     notice_message = Column(String, nullable=False)
     dept = Column(String, nullable=False)
     sec = Column(String, nullable=False)
