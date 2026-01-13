@@ -10,3 +10,7 @@ class CRSchema(StudentSchema):
     # Additional validations can be added here if needed
 
 
+
+class CRLoginSchema(BaseModel):
+    neura_or_id: str
+    password: constr(min_length=3)
