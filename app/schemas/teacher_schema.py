@@ -43,3 +43,9 @@ class TeacherSchema(BaseModel):
         if value.upper() not in allowed_depts:
             raise ValueError(f"Department must be one of {allowed_depts}")
         return value
+
+
+
+class TeacherLoginSchema(BaseModel):
+    neura_teacher_id: str
+    password: constr(min_length=3)

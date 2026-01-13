@@ -39,9 +39,9 @@ class StudentBaseSchema(BaseModel):
         return value
 
 
-class StudentCreateSchema(BaseModel):
+class StudentLoginSchema(BaseModel):
     neura_id: str
-    password: constr(min_length=8)
+    password: constr(min_length=3)
 
 class StudentSchema(StudentBaseSchema):
     full_name: str
