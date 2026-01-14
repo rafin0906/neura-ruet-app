@@ -4,13 +4,11 @@ from app.schemas.student_schemas import StudentSchema
 
 
 class CRSchema(StudentSchema):
-    or_no: str
-    neura_or_id: str
-
-    # Additional validations can be added here if needed
-
+    neura_id: None = None      #  remove student neura_id
+    neura_cr_id: str           #  CR-specific ID
+    cr_no: str
 
 
 class CRLoginSchema(BaseModel):
-    neura_or_id: str
+    neura_cr_id: str
     password: constr(min_length=3)

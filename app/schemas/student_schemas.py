@@ -44,9 +44,11 @@ class StudentLoginSchema(BaseModel):
     password: constr(min_length=3)
 
 class StudentSchema(StudentBaseSchema):
+    neura_id: str
     full_name: str
     roll_no: str
     dept: str
     series: int
     email: EmailStr
-    neura_id: str
+    mobile_no: str
+    section: str

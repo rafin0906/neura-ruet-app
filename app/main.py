@@ -2,6 +2,9 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic_settings import BaseSettings
 
+from dotenv import load_dotenv
+load_dotenv()
+
 
 from app.core.database import engine
 from app.core.database import Base
@@ -27,3 +30,7 @@ app.include_router(api_router, prefix="/api/v1")
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the FastAPI app!"}
+
+@app.get("/ping")
+def read_root():
+    return {"message": "route ping successful!"}
