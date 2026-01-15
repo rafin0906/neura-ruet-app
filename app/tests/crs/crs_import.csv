@@ -1,0 +1,6 @@
+roll_no,neura_cr_id,password
+2303201,NEURACR3201,"$argon2id$v=19$m=65536,t=3,p=4$75zhtLnQw4FdpAU9jrW32w$HarRWxNeKiRmlXimU3GBF9NkPUofjHvBDizngk1Ap3s"
+2303202,NEURACR3202,"$argon2id$v=19$m=65536,t=3,p=4$eA8RlCRvOb4CBzOJemRfww$tNTldg7vJbbfaxNhuS8O2iWcTtnwNsbGKrI8Zpw5xnc"
+2303203,NEURACR3203,"$argon2id$v=19$m=65536,t=3,p=4$e4tkyeXpqSLJD0wS3EpiZQ$j09Rse7MePsoyby8WVAZ82/3zIMUc+SZCl/n8hqtR44"
+2303204,NEURACR3204,"$argon2id$v=19$m=65536,t=3,p=4$7cP8nUKrOhWe+M/MxnlYrQ$pHOaX53lcxAko+pW6yattObd8fRcqP4x58QrsyLsklo"
+2303205,NEURACR3205,"$argon2id$v=19$m=65536,t=3,p=4$Pl1EuWz9cnn1a+4BSexMUQ$iNKrHoJoMTS2jGT2uf9IlhVS2TonTBu2jtcgopOIQmw"

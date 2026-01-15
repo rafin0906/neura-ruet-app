@@ -1,0 +1,6 @@
+email,neura_teacher_id,password
+teacher1@neura.edu,NEURAT1001,"$argon2id$v=19$m=65536,t=3,p=4$GTa30Og3S5h3/9NqvCSwKQ$QlrrglNITKc+Q4Tv6pnJ7De/ErVUFMXuZlZYWrZcFvs"
+teacher2@neura.edu,NEURAT1002,"$argon2id$v=19$m=65536,t=3,p=4$Qn0iPsg9YuwXjniFa2YyBg$Hv/Sf4sWqk4JelTFI5LNQml5tQmpzeDTNBe2lqzfls4"
+teacher3@neura.edu,NEURAT1003,"$argon2id$v=19$m=65536,t=3,p=4$nV96qJeqcG5yKD0+hNM7cQ$6DJNeKAfTjFhE2cukzbApf1oS2+lb0JuimSuD7TeC6w"
+teacher4@neura.edu,NEURAT1004,"$argon2id$v=19$m=65536,t=3,p=4$gjyxXSGWkRFGBbAmY/nlAA$xSU6/bJ43ECuiy2CaMMF4ftuGWaXbdSKbmPCnRlDIRM"
+teacher5@neura.edu,NEURAT1005,"$argon2id$v=19$m=65536,t=3,p=4$WpsefyN2MGmnks8rGSh9+g$zvE1kjXsRJiFVrSX9ropnTHNQ+MrY0pbOQ1k1fmE0WY"

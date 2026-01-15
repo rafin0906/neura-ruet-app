@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime
 from datetime import datetime
-from app.core.database import Base
+from app.db.database import Base
 
 
 class Student(Base):
@@ -8,7 +8,7 @@ class Student(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     full_name = Column(String, nullable=True)
-    roll_no = Column(String, unique=True, nullable=True)
+    roll_no = Column(String, unique=True, nullable=False)
     dept = Column(String, nullable=True)
     section = Column(String, nullable=True)
     series = Column(String, nullable=True)

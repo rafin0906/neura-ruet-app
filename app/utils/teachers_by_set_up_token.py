@@ -3,11 +3,12 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.student_models import Student
+from app.models.teacher_models import Teacher
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
-def get_student_from_setup_token(
+
+def get_teacher_from_setup_token(
     creds: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ):
@@ -16,13 +17,13 @@ def get_student_from_setup_token(
 
     token = creds.credentials
 
-    student = (
-        db.query(Student)
-        .filter(Student.setup_token == token)
+    teacher = (
+        db.query(Teacher)
+        .filter(Teacher.setup_token == token)
         .first()
     )
 
-    if not student:
+    if not teacher:
         raise HTTPException(status_code=401, detail="Invalid or expired setup token")
 
-    return student
+    return teacher

@@ -7,7 +7,7 @@ from fastapi import Depends, status, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.db.database import get_db
 from app.models.student_models import Student
 from app.models.teacher_models import Teacher
 from app.models.cr_models import CR
@@ -155,3 +155,5 @@ def get_current_cr(
 
 
     return cr
+
+

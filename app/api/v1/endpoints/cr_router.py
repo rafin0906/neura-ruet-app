@@ -1,35 +1,43 @@
-from fastapi import FastAPI, HTTPException, status, Response, Depends, APIRouter, Header
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from app.db.database import get_db
-from typing import List
 
 import jwt
-import secrets
 import os
 import random
+import secrets
 import smtplib
 from email.message import EmailMessage
-from datetime import datetime, timedelta , timezone
+from datetime import datetime, timedelta
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 
+from app.db.database import get_db
+from app.models.cr_models import CR
+from app.schemas.cr_schemas import CRLoginSchema, CRSchema, CRProfileSetupMeResponse
+from app.schemas.utils_schema import ForgetPasswordSchema, ResetPasswordSchema
 
-from app.models.student_models import Student
-from app.schemas.student_schemas import StudentLoginSchema, StudentSchema, StudentProfileSetupMeResponse
-from app.schemas.utils_schema import ForgetPasswordSchema
-from app.schemas.utils_schema import ResetPasswordSchema
-from app.utils.hashing import get_password_hash, hash_refresh_token, verify_refresh_token
-from app.utils.hashing import verify_password
+from app.utils.hashing import (
+    get_password_hash,
+    hash_refresh_token,
+    verify_refresh_token,
+    verify_password,
+)
 from app.utils.logger import logger
-from app.services.profile_set_up_dependencies import get_student_for_profile_setup
-from app.services.dependencies import create_access_token, get_current_student
-from app.services.dependencies import ACCESS_TOKEN_EXPIRE_MINUTES, SECRET_KEY, ALGORITHM
+from app.services.profile_set_up_dependencies import get_cr_for_profile_setup
+from app.services.dependencies import (
+    create_access_token,
+    get_current_cr,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    SECRET_KEY,
+    ALGORITHM,
+)
 
 
 refresh_bearer = HTTPBearer(auto_error=False)
 REFRESH_TOKEN_EXPIRE_DAYS = 30
-# Temporary in-memory OTP store: { email: {otp: str, expires: datetime} }
 otp_store = {}
+
+router = APIRouter(prefix="/crs", tags=["CRs"])
 
 
 def _mask_otp(otp: str) -> str:
@@ -39,20 +47,16 @@ def _mask_otp(otp: str) -> str:
 
 
 def sanitize_otp_store() -> dict:
-    """Return a sanitized copy of otp_store suitable for logging (mask OTP values)."""
     sanitized = {}
     for email, entry in otp_store.items():
         sanitized[email] = {
             "otp": _mask_otp(entry.get("otp")),
-            "expires": (
-                entry.get("expires").isoformat() if entry.get("expires") else None
-            ),
+            "expires": entry.get("expires").isoformat() if entry.get("expires") else None,
         }
     return sanitized
 
 
 def cleanup_expired_otps() -> None:
-    """Remove expired OTPs from the in-memory store."""
     now = datetime.utcnow()
     expired = [
         email
@@ -64,47 +68,40 @@ def cleanup_expired_otps() -> None:
         del otp_store[email]
 
 
-router = APIRouter(prefix="/students", tags=["Students"])
-
-
 @router.post("/login")
-def login(payload: StudentLoginSchema, db: Session = Depends(get_db)):
-    db_student = db.query(Student).filter(Student.neura_id == payload.neura_id).first()
+def cr_login(payload: CRLoginSchema, db: Session = Depends(get_db)):
+    cr = db.query(CR).filter(CR.neura_cr_id == payload.neura_cr_id).first()
+    if not cr:
+        raise HTTPException(status_code=400, detail="Neura CR ID invalid")
 
-    if not db_student:
-        raise HTTPException(status_code=400, detail="Neura ID invalid")
-
-    if not verify_password(payload.password, db_student.password):
+    if not verify_password(payload.password, cr.password):
         raise HTTPException(status_code=400, detail="Password invalid")
 
-    # 🔐 generate temporary setup token
     setup_token = secrets.token_urlsafe(32)
-    db_student.setup_token = setup_token
+    cr.setup_token = setup_token
     db.commit()
 
     return {"login_ok": True, "setup_token": setup_token}
 
 
 @router.post("/forget-password")
-def forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_db)):
-    db_student = db.query(Student).filter(Student.email == payload.email).first()
-    if not db_student:
+def cr_forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_db)):
+    cr = db.query(CR).filter(CR.email == payload.email).first()
+    if not cr:
         raise HTTPException(400, "Email not found")
 
-    # cleanup expired entries and generate 4-digit OTP
     cleanup_expired_otps()
     otp = f"{random.randint(1000, 9999)}"
     expires = datetime.utcnow() + timedelta(minutes=10)
     otp_store[payload.email] = {"otp": otp, "expires": expires}
-    masked = _mask_otp(otp)
+
     logger.info(
         "Generated OTP for %s (masked=%s), expires=%s",
         payload.email,
-        masked,
+        _mask_otp(otp),
         expires.isoformat(),
     )
 
-    # compose email
     subject = "Your password reset OTP"
     body = f"Your password reset OTP is: {otp}. It will expire in 10 minutes."
 
@@ -126,11 +123,10 @@ def forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_db)
                     server.login(smtp_user, smtp_pass)
                 server.send_message(msg)
                 logger.info("Sent OTP email to %s", payload.email)
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to send OTP email")
             raise HTTPException(status_code=500, detail="Failed to send OTP email")
     else:
-        # Fallback: log the OTP so developers can see it during local dev
         logger.info(
             "SMTP not configured; OTP generated for %s (masked=%s)",
             payload.email,
@@ -138,19 +134,13 @@ def forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_db)
         )
         logger.debug("Full OTP for %s: %s", payload.email, otp)
 
-    # logger.info("Sanitized OTP store after send: %s", sanitize_otp_store())
-    # logger.info("Full OTP store after send (debug only): %s", otp_store)
-
     return {"message": "OTP sent to your email"}
 
 
 @router.post("/reset-password")
-def reset_password(
-    payload: ResetPasswordSchema,
-    db: Session = Depends(get_db),
-):
-    db_student = db.query(Student).filter(Student.email == payload.email).first()
-    if not db_student:
+def cr_reset_password(payload: ResetPasswordSchema, db: Session = Depends(get_db)):
+    cr = db.query(CR).filter(CR.email == payload.email).first()
+    if not cr:
         raise HTTPException(400, "Email not found")
 
     cleanup_expired_otps()
@@ -169,91 +159,90 @@ def reset_password(
 
     logger.info("Current OTP store: %s", sanitize_otp_store())
 
-    # Ensure new password matches confirmation
     if payload.new_password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="Confirm Password does not match")
 
-    # Update password
-    hashed_password = get_password_hash(payload.new_password)
-    db_student.password = hashed_password
+    cr.password = get_password_hash(payload.new_password)
     db.commit()
-
-    # Remove used OTP
     del otp_store[payload.email]
 
     return {"message": "Password reset successful"}
 
 
 
-@router.get("/profile-setup/me", response_model=StudentProfileSetupMeResponse)
-def get_profile_setup_data(student: Student = Depends(get_student_for_profile_setup)):
-    return student
 
-
-
+@router.get("/profile-setup/me", response_model=CRProfileSetupMeResponse)
+def cr_profile_setup_me(cr: CR = Depends(get_cr_for_profile_setup)):
+    return cr
 
 @router.post("/profile-setup")
-def profile_setup(
-    payload: StudentSchema,
-    student: Student = Depends(get_student_for_profile_setup),
+def cr_profile_setup(
+    payload: CRSchema,
+    cr: CR = Depends(get_cr_for_profile_setup),
     db: Session = Depends(get_db),
 ):
     updatable = (
-        "full_name", "roll_no", "dept", "section",
-        "series", "mobile_no", "email", "profile_image",
+        "full_name",
+        "roll_no",
+        "dept",
+        "section",
+        "series",
+        "mobile_no",
+        "email",
+        "profile_image",
+        "cr_no",
     )
 
     for field in updatable:
         val = getattr(payload, field, None)
         if val is not None:
-            setattr(student, field, val)
+            setattr(cr, field, val)
 
-    # 🔒 invalidate setup token after use
-    student.setup_token = None
+    cr.setup_token = None
 
-    # ✅ ACCESS TOKEN (JWT, short)
     access_token = create_access_token(
         data={
-            "neura_id": student.neura_id,
-            "token_version": student.token_version,   # helpful for global logout later
+            "neura_cr_id": cr.neura_cr_id,
+            "token_version": cr.token_version,
             "type": "access",
         },
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
 
-    # ✅ REFRESH TOKEN (random secret, long)
-    refresh_token = secrets.token_urlsafe(48)     # secret (store in app securely)
-    refresh_token_id = secrets.token_urlsafe(16)  # non-secret lookup key
+    refresh_token = secrets.token_urlsafe(48)
+    refresh_token_id = secrets.token_urlsafe(16)
 
-    student.refresh_token_id = refresh_token_id
-    student.refresh_token_hash = hash_refresh_token(refresh_token)
-    student.refresh_token_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    cr.refresh_token_id = refresh_token_id
+    cr.refresh_token_hash = hash_refresh_token(refresh_token)
+    cr.refresh_token_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
 
     db.commit()
-    db.refresh(student)
+    db.refresh(cr)
 
     return {
         "message": "Profile updated",
         "access_token": access_token,
         "refresh_token": refresh_token,
-        "refresh_token_id": refresh_token_id,  # optional to return; useful for refresh endpoint
+        "refresh_token_id": refresh_token_id,
         "token_type": "bearer",
         "profile": {
-            "neura_id": student.neura_id,
-            "full_name": student.full_name,
-            "roll_no": student.roll_no,
-            "dept": student.dept,
-            "section": student.section,
-            "series": student.series,
-            "mobile_no": student.mobile_no,
-            "email": student.email,
-            "profile_image": student.profile_image,
+            "neura_cr_id": cr.neura_cr_id,
+            "full_name": cr.full_name,
+            "roll_no": cr.roll_no,
+            "dept": cr.dept,
+            "section": cr.section,
+            "series": cr.series,
+            "mobile_no": cr.mobile_no,
+            "email": cr.email,
+            "profile_image": cr.profile_image,
+            "cr_no": cr.cr_no,
         },
     }
 
 
+
 @router.post("/refresh")
-def refresh_access_token(
+def cr_refresh_access_token(
     credentials: HTTPAuthorizationCredentials | None = Depends(refresh_bearer),
     x_refresh_id: str = Header(..., alias="X-Refresh-Id"),
     x_access_token: str = Header(..., alias="X-Access-Token"),
@@ -285,33 +274,33 @@ def refresh_access_token(
     except InvalidTokenError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid access token")
 
-    # 3) lookup student by refresh_token_id
-    student = (
-        db.query(Student)
-        .filter(Student.refresh_token_id == x_refresh_id)
+    # 3) lookup CR by refresh_token_id
+    cr = (
+        db.query(CR)
+        .filter(CR.refresh_token_id == x_refresh_id)
         .first()
     )
-    if not student or not student.refresh_token_hash:
+    if not cr or not cr.refresh_token_hash:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
-    if not verify_refresh_token(refresh_token, student.refresh_token_hash):
+    if not verify_refresh_token(refresh_token, cr.refresh_token_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
-    if not student.refresh_token_expires_at or datetime.utcnow() > student.refresh_token_expires_at:
+    if not cr.refresh_token_expires_at or datetime.utcnow() > cr.refresh_token_expires_at:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token expired")
 
     # 4) bind refresh to the expired access token
-    if expired_payload.get("neura_id") != student.neura_id:
+    if expired_payload.get("neura_cr_id") != cr.neura_cr_id:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token mismatch")
 
-    if expired_payload.get("token_version") != student.token_version:
+    if expired_payload.get("token_version") != cr.token_version:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token revoked")
 
     # 5) issue new access token
     new_access_token = create_access_token(
         data={
-            "neura_id": student.neura_id,
-            "token_version": student.token_version,
+            "neura_cr_id": cr.neura_cr_id,
+            "token_version": cr.token_version,
             "type": "access",
         },
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
@@ -319,20 +308,14 @@ def refresh_access_token(
 
     return {"access_token": new_access_token, "token_type": "bearer"}
 
-
 @router.post("/logout")
-def logout(
-    student: Student = Depends(get_current_student),
+def cr_logout(
+    cr: CR = Depends(get_current_cr),
     db: Session = Depends(get_db),
 ):
-    # ✅ invalidate ALL access tokens immediately
-    student.token_version += 1
-
-    # ✅ also kill refresh token (important)
-    student.refresh_token_id = None
-    student.refresh_token_hash = None
-    student.refresh_token_expires_at = None
-
+    cr.token_version += 1
+    cr.refresh_token_id = None
+    cr.refresh_token_hash = None
+    cr.refresh_token_expires_at = None
     db.commit()
-
     return {"message": "Logged out successfully"}

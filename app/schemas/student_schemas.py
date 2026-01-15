@@ -22,7 +22,7 @@ class StudentBaseSchema(BaseModel):
         ]
         if value.upper() not in allowed_depts:
             raise ValueError(f"Department must be one of {allowed_depts}")
-        return value
+        return value.upper()
 
     @field_validator("series")
     def validate_series(cls, value):
@@ -44,7 +44,6 @@ class StudentLoginSchema(BaseModel):
     password: constr(min_length=3)
 
 class StudentSchema(StudentBaseSchema):
-    neura_id: str
     full_name: str
     roll_no: str
     dept: str
@@ -54,7 +53,7 @@ class StudentSchema(StudentBaseSchema):
     section: str
 
 
-class ProfileSetupMeResponse(BaseModel):
+class StudentProfileSetupMeResponse(BaseModel):
     neura_id: str
 
     full_name: Optional[str] = None

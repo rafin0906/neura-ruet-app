@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-from app.core.database import engine
-from app.core.database import Base
+from app.db.database import engine
+from app.db.database import Base
 from app.models.student_models import Student
 from app.models.teacher_models import Teacher
 from app.models.cr_models import CR
