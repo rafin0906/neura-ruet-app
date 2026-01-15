@@ -8,3 +8,11 @@ def verify_password(plain_password, hashed_password):
 
 def get_password_hash(password):
     return password_hash.hash(password)
+
+
+def hash_refresh_token(token: str) -> str:
+    return password_hash.hash(token)
+
+def verify_refresh_token(token: str, token_hash: str) -> bool:
+    return password_hash.verify(token, token_hash)
+

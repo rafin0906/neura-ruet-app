@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, constr, field_validator
 from typing import Optional
-
+from typing_extensions import Literal
 
 class StudentBaseSchema(BaseModel):
     full_name: Optional[str] = None
@@ -52,3 +52,21 @@ class StudentSchema(StudentBaseSchema):
     email: EmailStr
     mobile_no: str
     section: str
+
+
+class ProfileSetupMeResponse(BaseModel):
+    neura_id: str
+
+    full_name: Optional[str] = None
+    roll_no: Optional[str] = None
+
+    dept: Optional[str] = None
+    section: Optional[Literal["A", "B", "C"]] = None
+    series: Optional[int] = None
+
+    mobile_no: Optional[str] = None
+    email: Optional[EmailStr] = None
+    profile_image: Optional[str] = None
+
+    class Config:
+        from_attributes = True  # pydantic v2: lets you validate from ORM objects

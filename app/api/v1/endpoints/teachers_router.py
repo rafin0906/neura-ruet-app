@@ -1,29 +1,507 @@
-from fastapi import FastAPI, HTTPException, status, Response, Depends, APIRouter
+from fastapi import FastAPI, HTTPException, status, Response, Depends, APIRouter, Header
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from typing import List
-from app.models.teacher_models import Teacher
-from app.schemas.teacher_schema import TeacherLoginSchema
+import jwt
+import secrets
+import os
+import random
+import smtplib
+from email.message import EmailMessage
+from datetime import datetime, timedelta, timezone
+from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 
-router = APIRouter(
-    prefix="/teaches",
-    tags= ['Teachers']
+from app.models.teacher_models import Teacher
+from app.schemas.teacher_schema import TeacherLoginSchema, TeacherSchema
+from app.schemas.utils_schema import ForgetPasswordSchema, ResetPasswordSchema
+from app.utils.hashing import (
+    get_password_hash,
+    hash_refresh_token,
+    verify_refresh_token,
 )
+from app.utils.hashing import verify_password
+from app.utils.logger import logger
+from app.services.dependencies import create_access_token, get_current_teacher
+from app.services.dependencies import ACCESS_TOKEN_EXPIRE_MINUTES, SECRET_KEY, ALGORITHM
+
+REFRESH_TOKEN_EXPIRE_DAYS = 30
+otp_store = {}
+
+
+def _mask_otp(otp: str) -> str:
+    if not otp or len(otp) < 2:
+        return "**"
+    return "*" * (len(otp) - 1) + otp[-1]
+
+
+def sanitize_otp_store() -> dict:
+    sanitized = {}
+    for email, entry in otp_store.items():
+        sanitized[email] = {
+            "otp": _mask_otp(entry.get("otp")),
+            "expires": (
+                entry.get("expires").isoformat() if entry.get("expires") else None
+            ),
+        }
+    return sanitized
+
+
+def cleanup_expired_otps() -> None:
+    now = datetime.utcnow()
+    expired = [
+        email
+        for email, e in otp_store.items()
+        if e.get("expires") and e["expires"] < now
+    ]
+    for email in expired:
+        logger.debug("Removing expired OTP for %s", email)
+        del otp_store[email]
+
+
+router = APIRouter(prefix="/teachers", tags=["Teachers"])
 
 
 @router.post("/login")
-def login(
-    payload: TeacherLoginSchema,
-    db: Session = Depends(get_db)
-):
-    # check duplicate
-    db_teacher = db.query(Teacher).filter(
-        Teacher.neura_teacher_id == payload.neura_teacher_id
-    ).first()
+def login(payload: TeacherLoginSchema, db: Session = Depends(get_db)):
+    db_teacher = (
+        db.query(Teacher)
+        .filter(Teacher.neura_teacher_id == payload.neura_teacher_id)
+        .first()
+    )
     if not db_teacher:
-        raise HTTPException(400, "Neura Teacher ID invalid")
+        raise HTTPException(status_code=400, detail="Neura Teacher ID invalid")
+    if not verify_password(payload.password, db_teacher.password):
+        raise HTTPException(status_code=400, detail="Password invalid")
+    setup_token = secrets.token_urlsafe(32)
+    db_teacher.setup_token = setup_token
+    db.commit()
+    return {"login_ok": True, "setup_token": setup_token}
 
-    if db_teacher.password != payload.password:
-        raise HTTPException(400, "Password invalid")
-    
-    return {"message": "Login successful"}
+
+@router.post("/forget-password")
+def forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_db)):
+    db_teacher = db.query(Teacher).filter(Teacher.email == payload.email).first()
+    if not db_teacher:
+        raise HTTPException(400, "Email not found")
+    cleanup_expired_otps()
+    otp = f"{random.randint(1000, 9999)}"
+    expires = datetime.utcnow() + timedelta(minutes=10)
+    otp_store[payload.email] = {"otp": otp, "expires": expires}
+    masked = _mask_otp(otp)
+    logger.info(
+        "Generated OTP for %s (masked=%s), expires=%s",
+        payload.email,
+        masked,
+        expires.isoformat(),
+    )
+    subject = "Your password reset OTP"
+    body = f"Your password reset OTP is: {otp}. It will expire in 10 minutes."
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = os.getenv("SMTP_FROM", "no-reply@example.com")
+    msg["To"] = payload.email
+    msg.set_content(body)
+    smtp_host = os.getenv("SMTP_HOST")
+    if smtp_host:
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        smtp_user = os.getenv("SMTP_USER")
+        smtp_pass = os.getenv("SMTP_PASS")
+        try:
+            with smtplib.SMTP(smtp_host, smtp_port) as server:
+                server.starttls()
+                if smtp_user and smtp_pass:
+                    server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+                logger.info("Sent OTP email to %s", payload.email)
+        except Exception as e:
+            logger.exception("Failed to send OTP email")
+            raise HTTPException(status_code=500, detail="Failed to send OTP email")
+    else:
+        logger.info(
+            "SMTP not configured; OTP generated for %s (masked=%s)",
+            payload.email,
+            _mask_otp(otp),
+        )
+        logger.debug("Full OTP for %s: %s", payload.email, otp)
+    return {"message": "OTP sent to your email"}
+
+
+@router.post("/reset-password")
+def reset_password(
+    payload: ResetPasswordSchema,
+    db: Session = Depends(get_db),
+):
+    db_teacher = db.query(Teacher).filter(Teacher.email == payload.email).first()
+    if not db_teacher:
+        raise HTTPException(400, "Email not found")
+    cleanup_expired_otps()
+    otp_entry = otp_store.get(payload.email)
+    logger.info("Email: %s", payload.email)
+    logger.info("OTP entered: '%s'", payload.otp)
+    logger.info("OTP stored: '%s'", otp_entry["otp"] if otp_entry else None)
+    if not otp_entry or otp_entry["otp"] != payload.otp:
+        raise HTTPException(400, "Invalid OTP")
+    if datetime.utcnow() > otp_entry["expires"]:
+        del otp_store[payload.email]
+        raise HTTPException(400, "OTP expired")
+    logger.info("Current OTP store: %s", sanitize_otp_store())
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail="Confirm Password does not match")
+    hashed_password = get_password_hash(payload.new_password)
+    db_teacher.password = hashed_password
+    db.commit()
+    del otp_store[payload.email]
+    return {"message": "Password reset successful"}
+
+
+@router.get("/profile-setup/me")
+def get_profile_setup_data(teacher: Teacher = Depends(lambda: None)):
+    # TODO: Implement get_teacher_from_setup_token if needed
+    return teacher
+
+
+@router.post("/profile-setup")
+def profile_setup(
+    payload: TeacherSchema,
+    teacher: Teacher = Depends(lambda: None),
+    db: Session = Depends(get_db),
+):
+    updatable = (
+        "full_name",
+        "designation",
+        "dept",
+        "joining_year",
+        "mobile_no",
+        "email",
+        "profile_image",
+    )
+    for field in updatable:
+        val = getattr(payload, field, None)
+        if val is not None:
+            setattr(teacher, field, val)
+    teacher.setup_token = None
+    access_token = create_access_token(
+        data={
+            "neura_teacher_id": teacher.neura_teacher_id,
+            "token_version": teacher.token_version,
+            "type": "access",
+        },
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    refresh_token = secrets.token_urlsafe(48)
+    refresh_token_id = secrets.token_urlsafe(16)
+    teacher.refresh_token_id = refresh_token_id
+    teacher.refresh_token_hash = hash_refresh_token(refresh_token)
+    teacher.refresh_token_expires_at = datetime.utcnow() + timedelta(
+        days=REFRESH_TOKEN_EXPIRE_DAYS
+    )
+    db.commit()
+    db.refresh(teacher)
+    return {
+        "message": "Profile updated",
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "refresh_token_id": refresh_token_id,
+        "token_type": "bearer",
+        "profile": {
+            "neura_teacher_id": teacher.neura_teacher_id,
+            "full_name": teacher.full_name,
+            "designation": teacher.designation,
+            "dept": teacher.dept,
+            "joining_year": teacher.joining_year,
+            "mobile_no": teacher.mobile_no,
+            "email": teacher.email,
+            "profile_image": teacher.profile_image,
+        },
+    }
+
+
+@router.post("/refresh")
+def refresh_access_token(
+    authorization: str = Header(...),
+    x_refresh_id: str = Header(..., alias="X-Refresh-Id"),
+    x_access_token: str = Header(..., alias="X-Access-Token"),
+    db: Session = Depends(get_db),
+):
+    try:
+        jwt.decode(x_access_token, SECRET_KEY, algorithms=[ALGORITHM])
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Access token not expired yet")
+    except ExpiredSignatureError:
+        pass
+    except InvalidTokenError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid access token")
+    try:
+        expired_payload = jwt.decode(
+            x_access_token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"verify_exp": False},
+        )
+    except InvalidTokenError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid access token")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing refresh token")
+    refresh_token = authorization.replace("Bearer ", "").strip()
+    teacher = db.query(Teacher).filter(Teacher.refresh_token_id == x_refresh_id).first()
+    if not teacher or not teacher.refresh_token_hash:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
+    if not verify_refresh_token(refresh_token, teacher.refresh_token_hash):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
+    if (
+        not teacher.refresh_token_expires_at
+        or datetime.utcnow() > teacher.refresh_token_expires_at
+    ):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token expired")
+    if expired_payload.get("neura_teacher_id") != teacher.neura_teacher_id:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token mismatch")
+    if expired_payload.get("token_version") != teacher.token_version:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token revoked")
+    new_access_token = create_access_token(
+        data={
+            "neura_teacher_id": teacher.neura_teacher_id,
+            "token_version": teacher.token_version,
+            "type": "access",
+        },
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    return {"access_token": new_access_token, "token_type": "bearer"}
+
+
+@router.post("/logout")
+def logout(
+    teacher: Teacher = Depends(get_current_teacher),
+    db: Session = Depends(get_db),
+):
+    teacher.token_version += 1
+    teacher.refresh_token_id = None
+    teacher.refresh_token_hash = None
+    teacher.refresh_token_expires_at = None
+    db.commit()
+    return {"message": "Logged out successfully"}
+
+
+# --- CR ROUTES ---
+from app.models.cr_models import CR
+from app.schemas.cr_schemas import CRLoginSchema, CRSchema
+from app.services.dependencies import get_current_cr
+
+cr_router = APIRouter(prefix="/crs", tags=["CRs"])
+
+
+@cr_router.post("/login")
+def login(payload: CRLoginSchema, db: Session = Depends(get_db)):
+    db_cr = db.query(CR).filter(CR.neura_cr_id == payload.neura_cr_id).first()
+    if not db_cr:
+        raise HTTPException(status_code=400, detail="Neura CR ID invalid")
+    if not verify_password(payload.password, db_cr.password):
+        raise HTTPException(status_code=400, detail="Password invalid")
+    setup_token = secrets.token_urlsafe(32)
+    db_cr.setup_token = setup_token
+    db.commit()
+    return {"login_ok": True, "setup_token": setup_token}
+
+
+@cr_router.post("/forget-password")
+def forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_db)):
+    db_cr = db.query(CR).filter(CR.email == payload.email).first()
+    if not db_cr:
+        raise HTTPException(400, "Email not found")
+    cleanup_expired_otps()
+    otp = f"{random.randint(1000, 9999)}"
+    expires = datetime.utcnow() + timedelta(minutes=10)
+    otp_store[payload.email] = {"otp": otp, "expires": expires}
+    masked = _mask_otp(otp)
+    logger.info(
+        "Generated OTP for %s (masked=%s), expires=%s",
+        payload.email,
+        masked,
+        expires.isoformat(),
+    )
+    subject = "Your password reset OTP"
+    body = f"Your password reset OTP is: {otp}. It will expire in 10 minutes."
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = os.getenv("SMTP_FROM", "no-reply@example.com")
+    msg["To"] = payload.email
+    msg.set_content(body)
+    smtp_host = os.getenv("SMTP_HOST")
+    if smtp_host:
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        smtp_user = os.getenv("SMTP_USER")
+        smtp_pass = os.getenv("SMTP_PASS")
+        try:
+            with smtplib.SMTP(smtp_host, smtp_port) as server:
+                server.starttls()
+                if smtp_user and smtp_pass:
+                    server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+                logger.info("Sent OTP email to %s", payload.email)
+        except Exception as e:
+            logger.exception("Failed to send OTP email")
+            raise HTTPException(status_code=500, detail="Failed to send OTP email")
+    else:
+        logger.info(
+            "SMTP not configured; OTP generated for %s (masked=%s)",
+            payload.email,
+            _mask_otp(otp),
+        )
+        logger.debug("Full OTP for %s: %s", payload.email, otp)
+    return {"message": "OTP sent to your email"}
+
+
+@cr_router.post("/reset-password")
+def reset_password(
+    payload: ResetPasswordSchema,
+    db: Session = Depends(get_db),
+):
+    db_cr = db.query(CR).filter(CR.email == payload.email).first()
+    if not db_cr:
+        raise HTTPException(400, "Email not found")
+    cleanup_expired_otps()
+    otp_entry = otp_store.get(payload.email)
+    logger.info("Email: %s", payload.email)
+    logger.info("OTP entered: '%s'", payload.otp)
+    logger.info("OTP stored: '%s'", otp_entry["otp"] if otp_entry else None)
+    if not otp_entry or otp_entry["otp"] != payload.otp:
+        raise HTTPException(400, "Invalid OTP")
+    if datetime.utcnow() > otp_entry["expires"]:
+        del otp_store[payload.email]
+        raise HTTPException(400, "OTP expired")
+    logger.info("Current OTP store: %s", sanitize_otp_store())
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail="Confirm Password does not match")
+    hashed_password = get_password_hash(payload.new_password)
+    db_cr.password = hashed_password
+    db.commit()
+    del otp_store[payload.email]
+    return {"message": "Password reset successful"}
+
+
+@cr_router.get("/profile-setup/me")
+def get_profile_setup_data(cr: CR = Depends(lambda: None)):
+    # TODO: Implement get_cr_from_setup_token if needed
+    return cr
+
+
+@cr_router.post("/profile-setup")
+def profile_setup(
+    payload: CRSchema,
+    cr: CR = Depends(lambda: None),
+    db: Session = Depends(get_db),
+):
+    updatable = (
+        "full_name",
+        "roll_no",
+        "dept",
+        "section",
+        "series",
+        "mobile_no",
+        "email",
+        "profile_image",
+        "cr_no",
+    )
+    for field in updatable:
+        val = getattr(payload, field, None)
+        if val is not None:
+            setattr(cr, field, val)
+    cr.setup_token = None
+    access_token = create_access_token(
+        data={
+            "neura_cr_id": cr.neura_cr_id,
+            "token_version": cr.token_version,
+            "type": "access",
+        },
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    refresh_token = secrets.token_urlsafe(48)
+    refresh_token_id = secrets.token_urlsafe(16)
+    cr.refresh_token_id = refresh_token_id
+    cr.refresh_token_hash = hash_refresh_token(refresh_token)
+    cr.refresh_token_expires_at = datetime.utcnow() + timedelta(
+        days=REFRESH_TOKEN_EXPIRE_DAYS
+    )
+    db.commit()
+    db.refresh(cr)
+    return {
+        "message": "Profile updated",
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "refresh_token_id": refresh_token_id,
+        "token_type": "bearer",
+        "profile": {
+            "neura_cr_id": cr.neura_cr_id,
+            "full_name": cr.full_name,
+            "roll_no": cr.roll_no,
+            "dept": cr.dept,
+            "section": cr.section,
+            "series": cr.series,
+            "mobile_no": cr.mobile_no,
+            "email": cr.email,
+            "profile_image": cr.profile_image,
+            "cr_no": cr.cr_no,
+        },
+    }
+
+
+@cr_router.post("/refresh")
+def refresh_access_token(
+    authorization: str = Header(...),
+    x_refresh_id: str = Header(..., alias="X-Refresh-Id"),
+    x_access_token: str = Header(..., alias="X-Access-Token"),
+    db: Session = Depends(get_db),
+):
+    try:
+        jwt.decode(x_access_token, SECRET_KEY, algorithms=[ALGORITHM])
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Access token not expired yet")
+    except ExpiredSignatureError:
+        pass
+    except InvalidTokenError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid access token")
+    try:
+        expired_payload = jwt.decode(
+            x_access_token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"verify_exp": False},
+        )
+    except InvalidTokenError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid access token")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing refresh token")
+    refresh_token = authorization.replace("Bearer ", "").strip()
+    cr = db.query(CR).filter(CR.refresh_token_id == x_refresh_id).first()
+    if not cr or not cr.refresh_token_hash:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
+    if not verify_refresh_token(refresh_token, cr.refresh_token_hash):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
+    if (
+        not cr.refresh_token_expires_at
+        or datetime.utcnow() > cr.refresh_token_expires_at
+    ):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token expired")
+    if expired_payload.get("neura_cr_id") != cr.neura_cr_id:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token mismatch")
+    if expired_payload.get("token_version") != cr.token_version:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token revoked")
+    new_access_token = create_access_token(
+        data={
+            "neura_cr_id": cr.neura_cr_id,
+            "token_version": cr.token_version,
+            "type": "access",
+        },
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    return {"access_token": new_access_token, "token_type": "bearer"}
+
+
+@cr_router.post("/logout")
+def logout(
+    cr: CR = Depends(get_current_cr),
+    db: Session = Depends(get_db),
+):
+    cr.token_version += 1
+    cr.refresh_token_id = None
+    cr.refresh_token_hash = None
+    cr.refresh_token_expires_at = None
+    db.commit()
+    return {"message": "Logged out successfully"}
