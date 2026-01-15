@@ -2,38 +2,30 @@ from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
-
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.chat_room_models import ChatRoom, SenderRole
 from app.models.message_models import Message
-from app.models.student_models import Student
-
+from app.models.teacher_models import Teacher
 from app.schemas.chat_schemas import (
     ChatRoomCreateIn,
     ChatRoomOut,
     MessageCreateIn,
     MessageOut,
 )
+from app.services.dependencies import get_current_teacher
 
-from app.services.dependencies import get_current_student
-
-router = APIRouter(prefix="/students/chat", tags=["Student Chat"])
+router = APIRouter(prefix="/teachers/chat", tags=["Teacher Chat"])
 
 
-# -------------------------
-# Helpers
-# -------------------------
-
-def _get_student_room_or_404(db: Session, room_id: int, student_id: int) -> ChatRoom:
+def _get_teacher_room_or_404(db: Session, room_id: str, teacher_id: str) -> ChatRoom:
     room = (
         db.query(ChatRoom)
         .filter(
             ChatRoom.id == room_id,
-            ChatRoom.owner_role == SenderRole.student,
-            ChatRoom.owner_student_id == student_id,
+            ChatRoom.owner_role == SenderRole.teacher,
+            ChatRoom.owner_teacher_id == teacher_id,
         )
         .first()
     )
@@ -41,20 +33,16 @@ def _get_student_room_or_404(db: Session, room_id: int, student_id: int) -> Chat
         raise HTTPException(status_code=404, detail="Chat room not found")
     return room
 
-# -------------------------
-# Routes
-# -------------------------
-
 
 @router.post("/rooms", response_model=ChatRoomOut, status_code=status.HTTP_201_CREATED)
 def create_room(
     payload: ChatRoomCreateIn,
     db: Session = Depends(get_db),
-    student: Student = Depends(get_current_student),
+    teacher: Teacher = Depends(get_current_teacher),
 ):
     room = ChatRoom(
-        owner_role=SenderRole.student,
-        owner_student_id=student.id,
+        owner_role=SenderRole.teacher,
+        owner_teacher_id=str(teacher.id),
         title=payload.title,
     )
     db.add(room)
@@ -66,13 +54,13 @@ def create_room(
 @router.get("/rooms", response_model=List[ChatRoomOut])
 def list_rooms(
     db: Session = Depends(get_db),
-    student: Student = Depends(get_current_student),
+    teacher: Teacher = Depends(get_current_teacher),
 ):
     rooms = (
         db.query(ChatRoom)
         .filter(
-            ChatRoom.owner_role == SenderRole.student,
-            ChatRoom.owner_student_id == student.id,
+            ChatRoom.owner_role == SenderRole.teacher,
+            ChatRoom.owner_teacher_id == str(teacher.id),
         )
         .order_by(ChatRoom.updated_at.desc())
         .all()
@@ -82,11 +70,11 @@ def list_rooms(
 
 @router.get("/rooms/{room_id}/messages", response_model=List[MessageOut])
 def get_room_messages(
-    room_id: int,
+    room_id: str,
     db: Session = Depends(get_db),
-    student: Student = Depends(get_current_student),
+    teacher: Teacher = Depends(get_current_teacher),
 ):
-    _get_student_room_or_404(db, room_id, student.id)
+    _get_teacher_room_or_404(db, room_id, str(teacher.id))
 
     msgs = (
         db.query(Message)
@@ -97,24 +85,27 @@ def get_room_messages(
     return msgs
 
 
-@router.post("/rooms/{room_id}/messages", response_model=MessageOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/rooms/{room_id}/messages",
+    response_model=MessageOut,
+    status_code=status.HTTP_201_CREATED,
+)
 def send_message(
-    room_id: int,
+    room_id: str,
     payload: MessageCreateIn,
     db: Session = Depends(get_db),
-    student: Student = Depends(get_current_student),
+    teacher: Teacher = Depends(get_current_teacher),
 ):
-    room = _get_student_room_or_404(db, room_id, student.id)
+    room = _get_teacher_room_or_404(db, room_id, str(teacher.id))
 
     msg = Message(
         chat_room_id=room.id,
-        sender_role=SenderRole.student,
-        sender_student_id=student.id,
+        sender_role=SenderRole.teacher,
+        sender_teacher_id=str(teacher.id),
         content=payload.content,
     )
     db.add(msg)
 
-    # ensure room updated_at bumps
     room.updated_at = datetime.utcnow()
     db.add(room)
 

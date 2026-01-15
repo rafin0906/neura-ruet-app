@@ -13,12 +13,8 @@ from datetime import datetime, timedelta
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 
 from app.db.database import get_db
-from app.models.teacher_models import Teacher
-from app.schemas.teacher_schema import (
-    TeacherLoginSchema,
-    TeacherSchema,
-    TeacherProfileSetupMeResponse,
-)
+from app.models.cr_models import CR
+from app.schemas.cr_schemas import CRLoginSchema, CRSchema, CRProfileSetupMeResponse
 from app.schemas.utils_schema import ForgetPasswordSchema, ResetPasswordSchema
 
 from app.utils.hashing import (
@@ -28,19 +24,21 @@ from app.utils.hashing import (
     verify_password,
 )
 from app.utils.logger import logger
-from app.services.profile_set_up_dependencies import get_teacher_for_profile_setup
+from app.services.profile_set_up_dependencies import get_cr_for_profile_setup
 from app.services.dependencies import (
     create_access_token,
-    get_current_teacher,
+    get_current_cr,
     ACCESS_TOKEN_EXPIRE_MINUTES,
     SECRET_KEY,
     ALGORITHM,
 )
 
+
+refresh_bearer = HTTPBearer(auto_error=False)
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 otp_store = {}
-refresh_bearer = HTTPBearer(auto_error=False)
-router = APIRouter(prefix="/teachers", tags=["Teachers"])
+
+router = APIRouter(prefix="/crs", tags=["CRs"])
 
 
 def _mask_otp(otp: str) -> str:
@@ -54,9 +52,7 @@ def sanitize_otp_store() -> dict:
     for email, entry in otp_store.items():
         sanitized[email] = {
             "otp": _mask_otp(entry.get("otp")),
-            "expires": (
-                entry.get("expires").isoformat() if entry.get("expires") else None
-            ),
+            "expires": entry.get("expires").isoformat() if entry.get("expires") else None,
         }
     return sanitized
 
@@ -74,31 +70,25 @@ def cleanup_expired_otps() -> None:
 
 
 @router.post("/login")
-def teacher_login(payload: TeacherLoginSchema, db: Session = Depends(get_db)):
-    teacher = (
-        db.query(Teacher)
-        .filter(Teacher.neura_teacher_id == payload.neura_teacher_id)
-        .first()
-    )
-    if not teacher:
-        raise HTTPException(status_code=400, detail="Neura Teacher ID invalid")
+def cr_login(payload: CRLoginSchema, db: Session = Depends(get_db)):
+    cr = db.query(CR).filter(CR.neura_cr_id == payload.neura_cr_id).first()
+    if not cr:
+        raise HTTPException(status_code=400, detail="Neura CR ID invalid")
 
-    if not verify_password(payload.password, teacher.password):
+    if not verify_password(payload.password, cr.password):
         raise HTTPException(status_code=400, detail="Password invalid")
 
     setup_token = secrets.token_urlsafe(32)
-    teacher.setup_token = setup_token
+    cr.setup_token = setup_token
     db.commit()
 
     return {"login_ok": True, "setup_token": setup_token}
 
 
 @router.post("/forget-password")
-def teacher_forget_password(
-    payload: ForgetPasswordSchema, db: Session = Depends(get_db)
-):
-    teacher = db.query(Teacher).filter(Teacher.email == payload.email).first()
-    if not teacher:
+def cr_forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_db)):
+    cr = db.query(CR).filter(CR.email == payload.email).first()
+    if not cr:
         raise HTTPException(400, "Email not found")
 
     cleanup_expired_otps()
@@ -149,9 +139,9 @@ def teacher_forget_password(
 
 
 @router.post("/reset-password")
-def teacher_reset_password(payload: ResetPasswordSchema, db: Session = Depends(get_db)):
-    teacher = db.query(Teacher).filter(Teacher.email == payload.email).first()
-    if not teacher:
+def cr_reset_password(payload: ResetPasswordSchema, db: Session = Depends(get_db)):
+    cr = db.query(CR).filter(CR.email == payload.email).first()
+    if not cr:
         raise HTTPException(400, "Email not found")
 
     cleanup_expired_otps()
@@ -173,72 +163,82 @@ def teacher_reset_password(payload: ResetPasswordSchema, db: Session = Depends(g
     if payload.new_password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="Confirm Password does not match")
 
-    teacher.password = get_password_hash(payload.new_password)
+    cr.password = get_password_hash(payload.new_password)
     db.commit()
     del otp_store[payload.email]
 
     return {"message": "Password reset successful"}
 
 
-@router.get("/profile-setup/me", response_model=TeacherProfileSetupMeResponse)
-def teacher_profile_setup_me(teacher: Teacher = Depends(get_teacher_for_profile_setup)):
-    return teacher
+
+
+@router.get("/profile-setup/me", response_model=CRProfileSetupMeResponse)
+def cr_profile_setup_me(cr: CR = Depends(get_cr_for_profile_setup)):
+    return cr
 
 
 @router.post("/profile-setup")
-def teacher_profile_setup(
-    payload: TeacherSchema,
-    teacher: Teacher = Depends(get_teacher_for_profile_setup),
+def cr_profile_setup(
+    payload: CRSchema,
+    cr: CR = Depends(get_cr_for_profile_setup),
     db: Session = Depends(get_db),
 ):
-    # ✅ unique checks (only if user is updating it)
-    if payload.email and payload.email != teacher.email:
+    # ✅ UNIQUE checks (only if user changes them)
+
+    if payload.roll_no and payload.roll_no != cr.roll_no:
         exists = (
-            db.query(Teacher)
-            .filter(Teacher.email == payload.email, Teacher.id != teacher.id)
+            db.query(CR)
+            .filter(CR.roll_no == payload.roll_no, CR.id != cr.id)
             .first()
         )
         if exists:
-            raise HTTPException(
-                status_code=409,
-                detail="Email already used by another teacher",
-            )
+            raise HTTPException(status_code=409, detail="Roll no already used by another CR")
 
-    if payload.mobile_no and payload.mobile_no != teacher.mobile_no:
+    if payload.email and payload.email != cr.email:
         exists = (
-            db.query(Teacher)
-            .filter(Teacher.mobile_no == payload.mobile_no, Teacher.id != teacher.id)
+            db.query(CR)
+            .filter(CR.email == payload.email, CR.id != cr.id)
             .first()
         )
         if exists:
-            raise HTTPException(
-                status_code=409, detail="Mobile number already used by another teacher"
-            )
+            raise HTTPException(status_code=409, detail="Email already used by another CR")
 
+    if payload.mobile_no and payload.mobile_no != cr.mobile_no:
+        exists = (
+            db.query(CR)
+            .filter(CR.mobile_no == payload.mobile_no, CR.id != cr.id)
+            .first()
+        )
+        if exists:
+            raise HTTPException(status_code=409, detail="Mobile number already used")
+
+
+    # ✅ update allowed fields only
     updatable = (
         "full_name",
-        "designation",
         "dept",
-        "joining_year",
+        "section",
+        "series",
         "mobile_no",
         "email",
         "profile_image",
+        "cr_no",
     )
 
     for field in updatable:
         val = getattr(payload, field, None)
         if val is not None:
-            setattr(teacher, field, val)
+            setattr(cr, field, val)
 
-    # clear setup token only if still present
-    if teacher.setup_token:
-        teacher.setup_token = None
+    # 🔒 invalidate setup token only if still present
+    if cr.setup_token:
+        cr.setup_token = None
 
-    # tokens...
+    # ✅ issue tokens
     access_token = create_access_token(
         data={
-            "neura_teacher_id": teacher.neura_teacher_id,
-            "token_version": teacher.token_version,
+            "neura_cr_id": cr.neura_cr_id,
+            "token_version": cr.token_version,
             "type": "access",
         },
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
@@ -247,20 +247,18 @@ def teacher_profile_setup(
     refresh_token = secrets.token_urlsafe(48)
     refresh_token_id = secrets.token_urlsafe(16)
 
-    teacher.refresh_token_id = refresh_token_id
-    teacher.refresh_token_hash = hash_refresh_token(refresh_token)
-    teacher.refresh_token_expires_at = datetime.utcnow() + timedelta(
-        days=REFRESH_TOKEN_EXPIRE_DAYS
-    )
+    cr.refresh_token_id = refresh_token_id
+    cr.refresh_token_hash = hash_refresh_token(refresh_token)
+    cr.refresh_token_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
 
-    # ✅ commit safely (handles race conditions)
+    # ✅ commit safely (race-condition proof)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Unique constraint failed")
 
-    db.refresh(teacher)
+    db.refresh(cr)
 
     return {
         "message": "Profile updated",
@@ -269,20 +267,22 @@ def teacher_profile_setup(
         "refresh_token_id": refresh_token_id,
         "token_type": "bearer",
         "profile": {
-            "neura_teacher_id": teacher.neura_teacher_id,
-            "full_name": teacher.full_name,
-            "designation": teacher.designation,
-            "dept": teacher.dept,
-            "joining_year": teacher.joining_year,
-            "mobile_no": teacher.mobile_no,
-            "email": teacher.email,
-            "profile_image": teacher.profile_image,
+            "neura_cr_id": cr.neura_cr_id,
+            "full_name": cr.full_name,
+            "roll_no": cr.roll_no,
+            "dept": cr.dept,
+            "section": cr.section,
+            "series": cr.series,
+            "mobile_no": cr.mobile_no,
+            "email": cr.email,
+            "profile_image": cr.profile_image,
+            "cr_no": cr.cr_no,
         },
     }
 
 
 @router.post("/refresh")
-def teacher_refresh_access_token(
+def cr_refresh_access_token(
     credentials: HTTPAuthorizationCredentials | None = Depends(refresh_bearer),
     x_refresh_id: str = Header(..., alias="X-Refresh-Id"),
     x_access_token: str = Header(..., alias="X-Access-Token"),
@@ -290,9 +290,7 @@ def teacher_refresh_access_token(
 ):
     # 0) refresh token from Authorization: Bearer <refresh_token>
     if not credentials:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "Authorization header missing"
-        )
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authorization header missing")
 
     refresh_token = credentials.credentials
 
@@ -316,48 +314,64 @@ def teacher_refresh_access_token(
     except InvalidTokenError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid access token")
 
-    # 3) lookup teacher by refresh_token_id
-    teacher = db.query(Teacher).filter(Teacher.refresh_token_id == x_refresh_id).first()
-    if not teacher or not teacher.refresh_token_hash:
+    # 3) lookup CR by refresh_token_id
+    cr = db.query(CR).filter(CR.refresh_token_id == x_refresh_id).first()
+    if not cr or not cr.refresh_token_hash:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
-    if not verify_refresh_token(refresh_token, teacher.refresh_token_hash):
+    # 4) verify refresh token hash
+    if not verify_refresh_token(refresh_token, cr.refresh_token_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
-    if (
-        not teacher.refresh_token_expires_at
-        or datetime.utcnow() > teacher.refresh_token_expires_at
-    ):
+    # 5) refresh token expiry check
+    if not cr.refresh_token_expires_at or datetime.utcnow() > cr.refresh_token_expires_at:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token expired")
 
-    # 4) bind refresh to the expired access token
-    if expired_payload.get("neura_teacher_id") != teacher.neura_teacher_id:
+    # 6) bind refresh to the expired access token + token_version
+    if expired_payload.get("neura_cr_id") != cr.neura_cr_id:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token mismatch")
 
-    if expired_payload.get("token_version") != teacher.token_version:
+    if expired_payload.get("token_version") != cr.token_version:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token revoked")
 
-    # 5) issue new access token
+    # ✅ 7) issue new access token
     new_access_token = create_access_token(
         data={
-            "neura_teacher_id": teacher.neura_teacher_id,
-            "token_version": teacher.token_version,
+            "neura_cr_id": cr.neura_cr_id,
+            "token_version": cr.token_version,
             "type": "access",
         },
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
 
-    return {"access_token": new_access_token, "token_type": "bearer"}
+    # ✅ 8) ROTATE refresh token (new one replaces old)
+    new_refresh_token = secrets.token_urlsafe(48)
+    new_refresh_token_id = secrets.token_urlsafe(16)
+
+    cr.refresh_token_id = new_refresh_token_id
+    cr.refresh_token_hash = hash_refresh_token(new_refresh_token)
+    cr.refresh_token_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+
+    db.commit()
+    db.refresh(cr)
+
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "refresh_token_id": new_refresh_token_id,
+        "token_type": "bearer",
+    }
+
 
 
 @router.post("/logout")
-def teacher_logout(
-    teacher: Teacher = Depends(get_current_teacher),
+def cr_logout(
+    cr: CR = Depends(get_current_cr),
     db: Session = Depends(get_db),
 ):
-    teacher.token_version += 1
-    teacher.refresh_token_id = None
-    teacher.refresh_token_hash = None
-    teacher.refresh_token_expires_at = None
+    cr.token_version += 1
+    cr.refresh_token_id = None
+    cr.refresh_token_hash = None
+    cr.refresh_token_expires_at = None
     db.commit()
     return {"message": "Logged out successfully"}

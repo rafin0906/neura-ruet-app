@@ -314,11 +314,8 @@ def refresh_access_token(
     x_access_token: str = Header(..., alias="X-Access-Token"),
     db: Session = Depends(get_db),
 ):
-    # 0) refresh token from Authorization: Bearer <refresh_token>
     if not credentials:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "Authorization header missing"
-        )
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authorization header missing")
 
     refresh_token = credentials.credentials
 
@@ -342,28 +339,26 @@ def refresh_access_token(
     except InvalidTokenError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid access token")
 
-    # 3) lookup student by refresh_token_id
+    # 3) lookup by refresh_token_id
     student = db.query(Student).filter(Student.refresh_token_id == x_refresh_id).first()
     if not student or not student.refresh_token_hash:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
+    # 4) verify refresh token hash
     if not verify_refresh_token(refresh_token, student.refresh_token_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
-    if (
-        not student.refresh_token_expires_at
-        or datetime.utcnow() > student.refresh_token_expires_at
-    ):
+    # 5) expiry check
+    if not student.refresh_token_expires_at or datetime.utcnow() > student.refresh_token_expires_at:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token expired")
 
-    # 4) bind refresh to the expired access token
+    # 6) bind refresh to expired access token + token_version
     if expired_payload.get("neura_id") != student.neura_id:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token mismatch")
-
     if expired_payload.get("token_version") != student.token_version:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token revoked")
 
-    # 5) issue new access token
+    # ✅ 7) ISSUE NEW ACCESS TOKEN
     new_access_token = create_access_token(
         data={
             "neura_id": student.neura_id,
@@ -373,7 +368,22 @@ def refresh_access_token(
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
 
-    return {"access_token": new_access_token, "token_type": "bearer"}
+    # ✅ 8) ROTATE REFRESH TOKEN (new one replaces old)
+    new_refresh_token = secrets.token_urlsafe(48)
+    new_refresh_token_id = secrets.token_urlsafe(16)
+
+    student.refresh_token_id = new_refresh_token_id
+    student.refresh_token_hash = hash_refresh_token(new_refresh_token)
+    student.refresh_token_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+
+    db.commit()
+
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "refresh_token_id": new_refresh_token_id,
+        "token_type": "bearer",
+    }
 
 
 @router.post("/logout")
