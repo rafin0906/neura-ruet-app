@@ -10,7 +10,7 @@ class Teacher(Base):
     designation = Column(String, nullable=True)
     dept = Column(String, nullable=True)
     joining_year = Column(Integer, nullable=True)
-    mobile_no = Column(String, nullable=True)
+    mobile_no = Column(String, unique=True, nullable=True)
     email = Column(String, unique=True, nullable=True)
     neura_teacher_id = Column(String, unique=True, nullable=False)
     password = Column(String, nullable=False)

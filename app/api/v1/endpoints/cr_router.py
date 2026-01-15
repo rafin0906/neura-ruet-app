@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 import jwt
 import os
@@ -175,12 +176,44 @@ def cr_reset_password(payload: ResetPasswordSchema, db: Session = Depends(get_db
 def cr_profile_setup_me(cr: CR = Depends(get_cr_for_profile_setup)):
     return cr
 
+
 @router.post("/profile-setup")
 def cr_profile_setup(
     payload: CRSchema,
     cr: CR = Depends(get_cr_for_profile_setup),
     db: Session = Depends(get_db),
 ):
+    # ✅ UNIQUE checks (only if user changes them)
+
+    if payload.roll_no and payload.roll_no != cr.roll_no:
+        exists = (
+            db.query(CR)
+            .filter(CR.roll_no == payload.roll_no, CR.id != cr.id)
+            .first()
+        )
+        if exists:
+            raise HTTPException(status_code=409, detail="Roll no already used by another CR")
+
+    if payload.email and payload.email != cr.email:
+        exists = (
+            db.query(CR)
+            .filter(CR.email == payload.email, CR.id != cr.id)
+            .first()
+        )
+        if exists:
+            raise HTTPException(status_code=409, detail="Email already used by another CR")
+
+    if payload.mobile_no and payload.mobile_no != cr.mobile_no:
+        exists = (
+            db.query(CR)
+            .filter(CR.mobile_no == payload.mobile_no, CR.id != cr.id)
+            .first()
+        )
+        if exists:
+            raise HTTPException(status_code=409, detail="Mobile number already used")
+
+
+    # ✅ update allowed fields only
     updatable = (
         "full_name",
         "roll_no",
@@ -198,8 +231,11 @@ def cr_profile_setup(
         if val is not None:
             setattr(cr, field, val)
 
-    cr.setup_token = None
+    # 🔒 invalidate setup token only if still present
+    if cr.setup_token:
+        cr.setup_token = None
 
+    # ✅ issue tokens
     access_token = create_access_token(
         data={
             "neura_cr_id": cr.neura_cr_id,
@@ -216,7 +252,13 @@ def cr_profile_setup(
     cr.refresh_token_hash = hash_refresh_token(refresh_token)
     cr.refresh_token_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
 
-    db.commit()
+    # ✅ commit safely (race-condition proof)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Unique constraint failed")
+
     db.refresh(cr)
 
     return {

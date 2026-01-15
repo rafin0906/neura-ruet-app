@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException, status, Response, Depends, APIRouter, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+
 from app.db.database import get_db
 from typing import List
 
@@ -10,15 +12,23 @@ import os
 import random
 import smtplib
 from email.message import EmailMessage
-from datetime import datetime, timedelta , timezone
+from datetime import datetime, timedelta, timezone
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 
 
 from app.models.student_models import Student
-from app.schemas.student_schemas import StudentLoginSchema, StudentSchema, StudentProfileSetupMeResponse
+from app.schemas.student_schemas import (
+    StudentLoginSchema,
+    StudentSchema,
+    StudentProfileSetupMeResponse,
+)
 from app.schemas.utils_schema import ForgetPasswordSchema
 from app.schemas.utils_schema import ResetPasswordSchema
-from app.utils.hashing import get_password_hash, hash_refresh_token, verify_refresh_token
+from app.utils.hashing import (
+    get_password_hash,
+    hash_refresh_token,
+    verify_refresh_token,
+)
 from app.utils.hashing import verify_password
 from app.utils.logger import logger
 from app.services.profile_set_up_dependencies import get_student_for_profile_setup
@@ -184,12 +194,9 @@ def reset_password(
     return {"message": "Password reset successful"}
 
 
-
 @router.get("/profile-setup/me", response_model=StudentProfileSetupMeResponse)
 def get_profile_setup_data(student: Student = Depends(get_student_for_profile_setup)):
     return student
-
-
 
 
 @router.post("/profile-setup")
@@ -198,9 +205,49 @@ def profile_setup(
     student: Student = Depends(get_student_for_profile_setup),
     db: Session = Depends(get_db),
 ):
+    # ✅ UNIQUE checks (only if client is changing them)
+    if payload.email and payload.email != student.email:
+        exists = (
+            db.query(Student)
+            .filter(Student.email == payload.email, Student.id != student.id)
+            .first()
+        )
+        if exists:
+            raise HTTPException(
+                status_code=409, detail="Email already used by another student"
+            )
+
+    if payload.roll_no and payload.roll_no != student.roll_no:
+        exists = (
+            db.query(Student)
+            .filter(Student.roll_no == payload.roll_no, Student.id != student.id)
+            .first()
+        )
+        if exists:
+            raise HTTPException(
+                status_code=409, detail="Roll no already used by another student"
+            )
+
+    if payload.mobile_no and payload.mobile_no != student.mobile_no:
+        exists = (
+            db.query(Student)
+            .filter(Student.mobile_no == payload.mobile_no, Student.id != student.id)
+            .first()
+        )
+        if exists:
+            raise HTTPException(
+                status_code=409, detail="Mobile number already used by another student"
+            )
+
     updatable = (
-        "full_name", "roll_no", "dept", "section",
-        "series", "mobile_no", "email", "profile_image",
+        "full_name",
+        "roll_no",
+        "dept",
+        "section",
+        "series",
+        "mobile_no",
+        "email",
+        "profile_image",
     )
 
     for field in updatable:
@@ -208,35 +255,44 @@ def profile_setup(
         if val is not None:
             setattr(student, field, val)
 
-    # 🔒 invalidate setup token after use
-    student.setup_token = None
+    # 🔒 invalidate setup token only if it exists
+    if student.setup_token:
+        student.setup_token = None
 
     # ✅ ACCESS TOKEN (JWT, short)
     access_token = create_access_token(
         data={
             "neura_id": student.neura_id,
-            "token_version": student.token_version,   # helpful for global logout later
+            "token_version": student.token_version,
             "type": "access",
         },
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
 
     # ✅ REFRESH TOKEN (random secret, long)
-    refresh_token = secrets.token_urlsafe(48)     # secret (store in app securely)
-    refresh_token_id = secrets.token_urlsafe(16)  # non-secret lookup key
+    refresh_token = secrets.token_urlsafe(48)
+    refresh_token_id = secrets.token_urlsafe(16)
 
     student.refresh_token_id = refresh_token_id
     student.refresh_token_hash = hash_refresh_token(refresh_token)
-    student.refresh_token_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    student.refresh_token_expires_at = datetime.utcnow() + timedelta(
+        days=REFRESH_TOKEN_EXPIRE_DAYS
+    )
 
-    db.commit()
+    # ✅ commit safely (race-condition safe)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Unique constraint failed")
+
     db.refresh(student)
 
     return {
         "message": "Profile updated",
         "access_token": access_token,
         "refresh_token": refresh_token,
-        "refresh_token_id": refresh_token_id,  # optional to return; useful for refresh endpoint
+        "refresh_token_id": refresh_token_id,
         "token_type": "bearer",
         "profile": {
             "neura_id": student.neura_id,
@@ -261,7 +317,9 @@ def refresh_access_token(
 ):
     # 0) refresh token from Authorization: Bearer <refresh_token>
     if not credentials:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authorization header missing")
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Authorization header missing"
+        )
 
     refresh_token = credentials.credentials
 
@@ -286,18 +344,17 @@ def refresh_access_token(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid access token")
 
     # 3) lookup student by refresh_token_id
-    student = (
-        db.query(Student)
-        .filter(Student.refresh_token_id == x_refresh_id)
-        .first()
-    )
+    student = db.query(Student).filter(Student.refresh_token_id == x_refresh_id).first()
     if not student or not student.refresh_token_hash:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
     if not verify_refresh_token(refresh_token, student.refresh_token_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
-    if not student.refresh_token_expires_at or datetime.utcnow() > student.refresh_token_expires_at:
+    if (
+        not student.refresh_token_expires_at
+        or datetime.utcnow() > student.refresh_token_expires_at
+    ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token expired")
 
     # 4) bind refresh to the expired access token

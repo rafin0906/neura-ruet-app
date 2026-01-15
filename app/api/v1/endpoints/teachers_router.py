@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 import jwt
 import os
@@ -13,7 +14,11 @@ from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 
 from app.db.database import get_db
 from app.models.teacher_models import Teacher
-from app.schemas.teacher_schema import TeacherLoginSchema, TeacherSchema, TeacherProfileSetupMeResponse
+from app.schemas.teacher_schema import (
+    TeacherLoginSchema,
+    TeacherSchema,
+    TeacherProfileSetupMeResponse,
+)
 from app.schemas.utils_schema import ForgetPasswordSchema, ResetPasswordSchema
 
 from app.utils.hashing import (
@@ -49,7 +54,9 @@ def sanitize_otp_store() -> dict:
     for email, entry in otp_store.items():
         sanitized[email] = {
             "otp": _mask_otp(entry.get("otp")),
-            "expires": entry.get("expires").isoformat() if entry.get("expires") else None,
+            "expires": (
+                entry.get("expires").isoformat() if entry.get("expires") else None
+            ),
         }
     return sanitized
 
@@ -87,7 +94,9 @@ def teacher_login(payload: TeacherLoginSchema, db: Session = Depends(get_db)):
 
 
 @router.post("/forget-password")
-def teacher_forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_db)):
+def teacher_forget_password(
+    payload: ForgetPasswordSchema, db: Session = Depends(get_db)
+):
     teacher = db.query(Teacher).filter(Teacher.email == payload.email).first()
     if not teacher:
         raise HTTPException(400, "Email not found")
@@ -175,12 +184,37 @@ def teacher_reset_password(payload: ResetPasswordSchema, db: Session = Depends(g
 def teacher_profile_setup_me(teacher: Teacher = Depends(get_teacher_for_profile_setup)):
     return teacher
 
+
 @router.post("/profile-setup")
 def teacher_profile_setup(
     payload: TeacherSchema,
     teacher: Teacher = Depends(get_teacher_for_profile_setup),
     db: Session = Depends(get_db),
 ):
+    # ✅ unique checks (only if user is updating it)
+    if payload.email and payload.email != teacher.email:
+        exists = (
+            db.query(Teacher)
+            .filter(Teacher.email == payload.email, Teacher.id != teacher.id)
+            .first()
+        )
+        if exists:
+            raise HTTPException(
+                status_code=409,
+                detail="Email already used by another teacher",
+            )
+
+    if payload.mobile_no and payload.mobile_no != teacher.mobile_no:
+        exists = (
+            db.query(Teacher)
+            .filter(Teacher.mobile_no == payload.mobile_no, Teacher.id != teacher.id)
+            .first()
+        )
+        if exists:
+            raise HTTPException(
+                status_code=409, detail="Mobile number already used by another teacher"
+            )
+
     updatable = (
         "full_name",
         "designation",
@@ -196,8 +230,11 @@ def teacher_profile_setup(
         if val is not None:
             setattr(teacher, field, val)
 
-    teacher.setup_token = None
+    # clear setup token only if still present
+    if teacher.setup_token:
+        teacher.setup_token = None
 
+    # tokens...
     access_token = create_access_token(
         data={
             "neura_teacher_id": teacher.neura_teacher_id,
@@ -212,9 +249,17 @@ def teacher_profile_setup(
 
     teacher.refresh_token_id = refresh_token_id
     teacher.refresh_token_hash = hash_refresh_token(refresh_token)
-    teacher.refresh_token_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    teacher.refresh_token_expires_at = datetime.utcnow() + timedelta(
+        days=REFRESH_TOKEN_EXPIRE_DAYS
+    )
 
-    db.commit()
+    # ✅ commit safely (handles race conditions)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Unique constraint failed")
+
     db.refresh(teacher)
 
     return {
@@ -235,9 +280,6 @@ def teacher_profile_setup(
         },
     }
 
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-
-
 
 @router.post("/refresh")
 def teacher_refresh_access_token(
@@ -248,7 +290,9 @@ def teacher_refresh_access_token(
 ):
     # 0) refresh token from Authorization: Bearer <refresh_token>
     if not credentials:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authorization header missing")
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Authorization header missing"
+        )
 
     refresh_token = credentials.credentials
 
@@ -273,18 +317,17 @@ def teacher_refresh_access_token(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid access token")
 
     # 3) lookup teacher by refresh_token_id
-    teacher = (
-        db.query(Teacher)
-        .filter(Teacher.refresh_token_id == x_refresh_id)
-        .first()
-    )
+    teacher = db.query(Teacher).filter(Teacher.refresh_token_id == x_refresh_id).first()
     if not teacher or not teacher.refresh_token_hash:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
     if not verify_refresh_token(refresh_token, teacher.refresh_token_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
-    if not teacher.refresh_token_expires_at or datetime.utcnow() > teacher.refresh_token_expires_at:
+    if (
+        not teacher.refresh_token_expires_at
+        or datetime.utcnow() > teacher.refresh_token_expires_at
+    ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token expired")
 
     # 4) bind refresh to the expired access token

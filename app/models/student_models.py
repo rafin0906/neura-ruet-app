@@ -12,7 +12,7 @@ class Student(Base):
     dept = Column(String, nullable=True)
     section = Column(String, nullable=True)
     series = Column(String, nullable=True)
-    mobile_no = Column(String, nullable=True)
+    mobile_no = Column(String, unique=True, nullable=True)
     email = Column(String, unique=True, nullable=True)
     neura_id = Column(String, unique=True, nullable=False)
     password = Column(String, nullable=False)

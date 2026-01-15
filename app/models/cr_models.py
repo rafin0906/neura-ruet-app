@@ -14,9 +14,9 @@ class CR(Base):
     dept = Column(String, nullable=True)
     section = Column(String, nullable=True)
     series = Column(String, nullable=True)
-    mobile_no = Column(String, nullable=True)
+    mobile_no = Column(String, unique=True, nullable=True)
     email = Column(String, unique=True, nullable=True)
-    cr_no = Column(String, unique=True, nullable=True)
+    cr_no = Column(String, nullable=True)
 
     # --- CR identity fields (replace neura_id) ---
     neura_cr_id = Column(String, unique=True, nullable=False)
