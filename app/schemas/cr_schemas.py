@@ -25,7 +25,6 @@ class CRBaseSchema(StudentBaseSchema):
 class CRSchema(CRBaseSchema):
 
     full_name: str
-    roll_no: str
     dept: str
     section: Literal["A", "B", "C"]
     series: int

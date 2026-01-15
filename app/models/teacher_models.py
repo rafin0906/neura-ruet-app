@@ -1,11 +1,15 @@
+import uuid
 from sqlalchemy import Column, Integer, String, DateTime
 from datetime import datetime
 from app.db.database import Base
 
+
 class Teacher(Base):
     __tablename__ = "teachers"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(
+        String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4())
+    )
     full_name = Column(String, nullable=True)
     designation = Column(String, nullable=True)
     dept = Column(String, nullable=True)

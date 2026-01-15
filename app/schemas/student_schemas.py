@@ -45,7 +45,6 @@ class StudentLoginSchema(BaseModel):
 
 class StudentSchema(StudentBaseSchema):
     full_name: str
-    roll_no: str
     dept: str
     series: int
     email: EmailStr

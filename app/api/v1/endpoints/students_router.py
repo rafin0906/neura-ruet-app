@@ -241,7 +241,6 @@ def profile_setup(
 
     updatable = (
         "full_name",
-        "roll_no",
         "dept",
         "section",
         "series",

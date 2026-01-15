@@ -1,3 +1,4 @@
+import uuid
 from sqlalchemy import Column, Integer, String, DateTime
 from datetime import datetime
 from app.db.database import Base
@@ -6,7 +7,9 @@ from app.db.database import Base
 class Student(Base):
     __tablename__ = "students"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(
+        String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4())
+    )
     full_name = Column(String, nullable=True)
     roll_no = Column(String, unique=True, nullable=False)
     dept = Column(String, nullable=True)

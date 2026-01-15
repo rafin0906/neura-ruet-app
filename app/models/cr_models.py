@@ -1,3 +1,4 @@
+import uuid
 from sqlalchemy import Column, Integer, String, DateTime
 from datetime import datetime
 from app.db.database import Base
@@ -6,7 +7,9 @@ from app.db.database import Base
 class CR(Base):
     __tablename__ = "crs"  # choose "crs" or "cr" (but "crs" is nicer)
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(
+        String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4())
+    )
 
     # --- student-like profile fields ---
     full_name = Column(String, nullable=True)
@@ -37,4 +40,3 @@ class CR(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-

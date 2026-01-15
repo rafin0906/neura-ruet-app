@@ -16,10 +16,16 @@ from app.models.semester_question_models import SemesterQuestion
 from app.models.lecture_slide_models import LectureSlide
 from app.models.class_note_models import ClassNote
 from app.models.notice_models import Notice
+from app.models.chat_room_models import ChatRoom, SenderRole
+from app.models.message_models import Message
+from app.models.result_sheet_models import ResultSheet
+from app.models.result_entry_models import ResultEntry
+
+
 from app.api.v1.api import api_router
 
 # Create all tables
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 

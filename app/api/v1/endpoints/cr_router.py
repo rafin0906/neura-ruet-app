@@ -216,7 +216,6 @@ def cr_profile_setup(
     # ✅ update allowed fields only
     updatable = (
         "full_name",
-        "roll_no",
         "dept",
         "section",
         "series",

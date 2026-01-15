@@ -1,3 +1,4 @@
+import uuid
 from sqlalchemy import Column, Integer, String, DateTime
 from datetime import datetime
 from app.db.database import Base
@@ -6,7 +7,9 @@ from app.db.database import Base
 class ClassNote(Base):
     __tablename__ = "class_notes"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(
+        String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4())
+    )
     course_code = Column(String, nullable=False)
     course_name = Column(String, nullable=False)
     topic = Column(String, nullable=False)
