@@ -15,31 +15,11 @@ from app.schemas.chat_schemas import (
     MessageOut,
 )
 from app.services.dependencies import get_current_student
+from app.services.chat_service import _get_student_room_or_404
 
 router = APIRouter(prefix="/students/chat", tags=["Student Chat"])
 
 
-# -------------------------
-# Helpers
-# -------------------------
-def _get_student_room_or_404(db: Session, room_id: str, student_id: str) -> ChatRoom:
-    room = (
-        db.query(ChatRoom)
-        .filter(
-            ChatRoom.id == room_id,
-            ChatRoom.owner_role == SenderRole.student,
-            ChatRoom.owner_student_id == student_id,
-        )
-        .first()
-    )
-    if not room:
-        raise HTTPException(status_code=404, detail="Chat room not found")
-    return room
-
-
-# -------------------------
-# Routes
-# -------------------------
 @router.post("/rooms", response_model=ChatRoomOut, status_code=status.HTTP_201_CREATED)
 def create_room(
     payload: ChatRoomCreateIn,

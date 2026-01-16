@@ -15,23 +15,9 @@ from app.schemas.chat_schemas import (
     MessageOut,
 )
 from app.services.dependencies import get_current_cr
+from app.services.chat_service import _get_cr_room_or_404
 
 router = APIRouter(prefix="/crs/chat", tags=["CR Chat"])
-
-
-def _get_cr_room_or_404(db: Session, room_id: str, cr_id: str) -> ChatRoom:
-    room = (
-        db.query(ChatRoom)
-        .filter(
-            ChatRoom.id == room_id,
-            ChatRoom.owner_role == SenderRole.cr,
-            ChatRoom.owner_cr_id == cr_id,
-        )
-        .first()
-    )
-    if not room:
-        raise HTTPException(status_code=404, detail="Chat room not found")
-    return room
 
 
 @router.post("/rooms", response_model=ChatRoomOut, status_code=status.HTTP_201_CREATED)

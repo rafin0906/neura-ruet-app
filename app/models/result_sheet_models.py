@@ -27,6 +27,7 @@ class ResultSheet(Base):
     created_by_teacher_id = Column(
         String(36), ForeignKey("teachers.id", ondelete="SET NULL"), nullable=True
     )
+    title = Column(String, nullable=True)
 
     ct_no = Column(Integer, nullable=True)
     course_code = Column(String, nullable=False)
