@@ -1,0 +1,65 @@
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.orm import Session
+
+from app.db.database import get_db
+from app.schemas.notice_schemas import CRNoticeCreate, NoticeResponse, CRNoticeUpdate
+from app.services.dependencies import get_current_cr
+from app.services.notice_service import (
+    create_notice_by_cr,
+    get_cr_notices,
+    get_cr_notice_by_id,
+    update_cr_notice,
+    delete_cr_notice,
+)
+from app.models.cr_models import CR
+
+router = APIRouter(prefix="/cr/notices", tags=["Notices (CR)"])
+
+
+@router.post("", response_model=NoticeResponse)
+def upload_notice_cr(
+    payload: CRNoticeCreate,
+    cr: CR = Depends(get_current_cr),
+    db: Session = Depends(get_db),
+):
+    return create_notice_by_cr(db=db, payload=payload, cr=cr)
+
+
+@router.get("", response_model=list[NoticeResponse])
+def get_my_uploaded_notices_cr(
+    cr: CR = Depends(get_current_cr),
+    db: Session = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    return get_cr_notices(db=db, cr=cr, skip=skip, limit=limit)
+
+
+@router.get("/{notice_id}", response_model=NoticeResponse)
+def get_my_notice_by_id_cr(
+    notice_id: str,
+    cr: CR = Depends(get_current_cr),
+    db: Session = Depends(get_db),
+):
+    return get_cr_notice_by_id(db=db, cr=cr, notice_id=notice_id)
+
+
+
+@router.patch("/{notice_id}", response_model=NoticeResponse)
+def update_my_notice_cr(
+    notice_id: str,
+    payload: CRNoticeUpdate,
+    cr: CR = Depends(get_current_cr),
+    db: Session = Depends(get_db),
+):
+    return update_cr_notice(db=db, cr=cr, notice_id=notice_id, payload=payload)
+
+
+@router.delete("/{notice_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_my_notice_cr(
+    notice_id: str,
+    cr: CR = Depends(get_current_cr),
+    db: Session = Depends(get_db),
+):
+    delete_cr_notice(db=db, cr=cr, notice_id=notice_id)
+    return None

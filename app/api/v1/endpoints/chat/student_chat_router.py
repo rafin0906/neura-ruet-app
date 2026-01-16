@@ -80,6 +80,8 @@ def send_message(
 ):
     room = _get_student_room_or_404(db, room_id, str(student.id))
 
+    tool_name = payload.tool_name  # currently unused
+
     msg = Message(
         chat_room_id=room.id,                # str
         sender_role=SenderRole.student,

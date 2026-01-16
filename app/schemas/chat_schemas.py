@@ -30,6 +30,7 @@ class ChatRoomOut(BaseModel):
 # -------- Message --------
 
 class MessageCreateIn(BaseModel):
+    tool_name: str
     content: str
 
 
