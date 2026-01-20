@@ -210,3 +210,4 @@ def delete_teacher_notice(db: Session, teacher: Teacher, notice_id: str) -> None
 
     db.delete(notice)
     db.commit()
+
