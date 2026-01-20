@@ -35,10 +35,6 @@ def _change_password(user_obj, payload: PasswordUpdateIn, db: Session):
 
     user_obj.password = get_password_hash(payload.new_password)
 
-    # optional global logout (if you use token_version)
-    if hasattr(user_obj, "token_version") and user_obj.token_version is not None:
-        user_obj.token_version += 1
-
     db.commit()
 
 
