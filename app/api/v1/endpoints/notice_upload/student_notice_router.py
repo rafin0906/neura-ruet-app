@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.schemas.notice_schemas import NoticeResponse
+from app.schemas.backend_schemas.notice_schemas import NoticeResponse
 from app.services.dependencies import get_current_student
 from app.services.notice_service import get_student_notices
 from app.models.student_models import Student

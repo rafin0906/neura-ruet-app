@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.schemas.notice_schemas import TeacherNoticeCreate, NoticeResponse, TeacherNoticeUpdate
+from app.schemas.backend_schemas.notice_schemas import TeacherNoticeCreate, NoticeResponse, TeacherNoticeUpdate
 from app.services.dependencies import get_current_teacher
 from app.services.notice_service import (
     create_notice_by_teacher,

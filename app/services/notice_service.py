@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from app.models.notice_models import Notice
-from app.schemas.notice_schemas import TeacherNoticeCreate, CRNoticeCreate, TeacherNoticeUpdate, CRNoticeUpdate
+from app.schemas.backend_schemas.notice_schemas import TeacherNoticeCreate, CRNoticeCreate, TeacherNoticeUpdate, CRNoticeUpdate
 from app.models.teacher_models import Teacher
 from app.models.cr_models import CR
 from app.models.student_models import Student

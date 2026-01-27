@@ -14,8 +14,8 @@ from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 
 from app.db.database import get_db
 from app.models.cr_models import CR
-from app.schemas.cr_schemas import CRLoginSchema, CRSchema, CRProfileSetupMeResponse
-from app.schemas.utils_schema import ForgetPasswordSchema, ResetPasswordSchema
+from app.schemas.backend_schemas.cr_schemas import CRLoginSchema, CRSchema, CRProfileSetupMeResponse
+from app.schemas.backend_schemas.utils_schema import ForgetPasswordSchema, ResetPasswordSchema
 
 from app.utils.hashing import (
     get_password_hash,

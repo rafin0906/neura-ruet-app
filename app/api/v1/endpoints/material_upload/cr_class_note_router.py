@@ -8,7 +8,7 @@ from app.models.class_note_models import ClassNote
 from app.models.cr_models import CR
 from app.services.dependencies import get_current_cr
 
-from app.schemas.class_note_schemas import (
+from app.schemas.backend_schemas.class_note_schemas import (
     CRClassNoteCreate,
     CRClassNoteUpdate,
     ClassNoteResponse,

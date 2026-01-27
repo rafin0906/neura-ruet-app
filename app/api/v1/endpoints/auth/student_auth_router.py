@@ -17,13 +17,13 @@ from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 
 
 from app.models.student_models import Student
-from app.schemas.student_schemas import (
+from app.schemas.backend_schemas.student_schemas import (
     StudentLoginSchema,
     StudentSchema,
     StudentProfileSetupMeResponse,
 )
-from app.schemas.utils_schema import ForgetPasswordSchema
-from app.schemas.utils_schema import ResetPasswordSchema
+from app.schemas.backend_schemas.utils_schema import ForgetPasswordSchema
+from app.schemas.backend_schemas.utils_schema import ResetPasswordSchema
 from app.utils.hashing import (
     get_password_hash,
     hash_refresh_token,

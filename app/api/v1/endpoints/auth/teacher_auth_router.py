@@ -14,12 +14,12 @@ from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 
 from app.db.database import get_db
 from app.models.teacher_models import Teacher
-from app.schemas.teacher_schema import (
+from app.schemas.backend_schemas.teacher_schema import (
     TeacherLoginSchema,
     TeacherSchema,
     TeacherProfileSetupMeResponse,
 )
-from app.schemas.utils_schema import ForgetPasswordSchema, ResetPasswordSchema
+from app.schemas.backend_schemas.utils_schema import ForgetPasswordSchema, ResetPasswordSchema
 
 from app.utils.hashing import (
     get_password_hash,

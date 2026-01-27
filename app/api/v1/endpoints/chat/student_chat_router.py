@@ -8,7 +8,7 @@ from app.db.database import get_db
 from app.models.chat_room_models import ChatRoom, SenderRole
 from app.models.message_models import Message
 from app.models.student_models import Student
-from app.schemas.chat_schemas import (
+from app.schemas.backend_schemas.chat_schemas import (
     ChatRoomCreateIn,
     ChatRoomOut,
     MessageCreateIn,
@@ -28,7 +28,7 @@ def create_room(
 ):
     room = ChatRoom(
         owner_role=SenderRole.student,
-        owner_student_id=str(student.id),   # force str
+        owner_student_id=str(student.id),  
         title=payload.title,
     )
     db.add(room)
@@ -83,9 +83,9 @@ def send_message(
     tool_name = payload.tool_name  # currently unused
 
     msg = Message(
-        chat_room_id=room.id,                # str
+        chat_room_id=room.id,                
         sender_role=SenderRole.student,
-        sender_student_id=str(student.id),   # str
+        sender_student_id=str(student.id),   
         content=payload.content,
     )
     db.add(msg)

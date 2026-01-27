@@ -13,7 +13,7 @@ from app.services.dependencies import (
     get_current_cr,
 )
 
-from app.schemas.password_update_schemas import PasswordUpdateIn
+from app.schemas.backend_schemas.password_update_schemas import PasswordUpdateIn
 from app.utils.hashing import verify_password, get_password_hash
 
 

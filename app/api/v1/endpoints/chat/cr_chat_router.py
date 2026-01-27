@@ -8,7 +8,7 @@ from app.db.database import get_db
 from app.models.chat_room_models import ChatRoom, SenderRole
 from app.models.message_models import Message
 from app.models.cr_models import CR
-from app.schemas.chat_schemas import (
+from app.schemas.backend_schemas.chat_schemas import (
     ChatRoomCreateIn,
     ChatRoomOut,
     MessageCreateIn,

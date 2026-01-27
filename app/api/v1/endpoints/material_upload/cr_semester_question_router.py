@@ -7,7 +7,7 @@ from app.models.semester_question_models import SemesterQuestion
 from app.models.cr_models import CR
 from app.services.dependencies import get_current_cr
 
-from app.schemas.semester_question_schemas import (
+from app.schemas.backend_schemas.semester_question_schemas import (
     CRSemesterQuestionCreate,
     CRSemesterQuestionUpdate,
     SemesterQuestionResponse,

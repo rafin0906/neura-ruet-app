@@ -7,7 +7,7 @@ from app.models.ct_question_models import CTQuestion
 from app.models.cr_models import CR
 from app.services.dependencies import get_current_cr
 
-from app.schemas.ct_question_schemas import (
+from app.schemas.backend_schemas.ct_question_schemas import (
     CRCTQuestionCreate,
     CRCTQuestionUpdate,
     CTQuestionResponse,

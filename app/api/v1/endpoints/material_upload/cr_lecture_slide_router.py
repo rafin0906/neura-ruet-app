@@ -7,7 +7,7 @@ from app.models.lecture_slide_models import LectureSlide
 from app.models.cr_models import CR
 from app.services.dependencies import get_current_cr
 
-from app.schemas.lecture_slide_schemas import (
+from app.schemas.backend_schemas.lecture_slide_schemas import (
     CRLectureSlideCreate,
     CRLectureSlideUpdate,
     LectureSlideResponse,

@@ -1,7 +1,7 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.models.result_sheet_models import ResultSheet
-from app.schemas.result_schemas import ResultSheetCreate
+from app.schemas.backend_schemas.result_schemas import ResultSheetCreate
 
 from typing import Optional
 

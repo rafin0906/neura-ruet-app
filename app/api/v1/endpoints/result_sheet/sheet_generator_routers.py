@@ -12,7 +12,7 @@ from app.services.dependencies import get_current_teacher
 from app.models.result_sheet_models import ResultSheet
 from app.models.result_entry_models import ResultEntry
 
-from app.schemas.result_schemas import (
+from app.schemas.backend_schemas.result_schemas import (
     ResultSheetCreate,
     ResultSheetResponse,
     ResultSheetBatchUpload,

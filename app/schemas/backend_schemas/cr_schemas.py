@@ -2,7 +2,7 @@ from pydantic import BaseModel, EmailStr, constr, field_validator
 from typing import Optional
 from typing_extensions import Literal
 
-from app.schemas.student_schemas import StudentBaseSchema
+from app.schemas.backend_schemas.student_schemas import StudentBaseSchema
 
 
 class CRBaseSchema(StudentBaseSchema):
