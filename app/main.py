@@ -23,11 +23,12 @@ from app.models.result_entry_models import ResultEntry
 
 
 from app.api.v1.api import api_router
-
+from app.ai.tool_registry import init_tools
 # Create all tables
 # Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+init_tools()
 
 # Include the API router
 app.include_router(api_router, prefix="/api/v1")
