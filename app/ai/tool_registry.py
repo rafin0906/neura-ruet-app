@@ -46,6 +46,19 @@ Field constraints:
 - ct_no ONLY for ct_question.
 - year ONLY for semester_question.
 
+Field map (MUST follow):
+- Always allowed for ALL: course_code, course_name, dept, sec, series
+- class_note allowed: topic, written_by
+- lecture_slide allowed: topic
+- ct_question allowed: ct_no
+- semester_question allowed: year
+
+IMPORTANT:
+- If the user says a topic-like word for ct_question (e.g., "dc motor"), put it in course_name (NOT topic).
+- If the user says a topic-like word for semester_question, put it in course_name (NOT topic).
+- Never output fields that are not allowed for that material_type.
+
+
 Output format rules:
 - Always include: tool, mode, material_type, match_mode, limit, offset, sort_by, confidence, missing_fields.
 - If mode="ask", you MUST include "question".

@@ -3,6 +3,7 @@ from typing import List
 import traceback
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.params import Body
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
@@ -27,23 +28,35 @@ from app.services.answer_llm_service import build_answer_prompt
 
 router = APIRouter(prefix="/students/chat", tags=["Student Chat"])
 
+def _auto_title_from_text(text: str, max_len: int = 60) -> str:
+    text = " ".join((text or "").strip().split())
+    if not text:
+        return "New chat"
+    if len(text) <= max_len:
+        return text
+    cut = text[:max_len]
+    # avoid cutting mid-word
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut + "…"
+
+
 
 @router.post("/rooms", response_model=ChatRoomOut, status_code=status.HTTP_201_CREATED)
 def create_room(
-    payload: ChatRoomCreateIn,
+    payload: ChatRoomCreateIn = Body(default_factory=ChatRoomCreateIn),
     db: Session = Depends(get_db),
     student: Student = Depends(get_current_student),
 ):
     room = ChatRoom(
         owner_role=SenderRole.student,
         owner_student_id=str(student.id),
-        title=payload.title,
+        title=(payload.title.strip() if payload.title and payload.title.strip() else "New chat"),
     )
     db.add(room)
     db.commit()
     db.refresh(room)
     return room
-
 
 @router.get("/rooms", response_model=List[ChatRoomOut])
 def list_rooms(
@@ -114,6 +127,14 @@ def send_message(
     db.commit()
     db.refresh(student_msg)
 
+        # ✅ Auto-title on first message 
+    if room.title and room.title.strip().lower() == "new chat":
+        room.title = _auto_title_from_text(payload.content)
+        room.updated_at = datetime.utcnow()
+        db.add(room)
+        db.commit()
+        db.refresh(room)
+
     # 2) planner tool pipeline (LLM JSON -> DB search bundle OR clarification)
     try:
         result_payload = run_tool_and_get_assistant_text(
@@ -134,7 +155,9 @@ def send_message(
     
 
     # 3) build final assistant answer (do NOT save planner JSON)
-    if isinstance(result_payload, dict) and result_payload.get("needs_clarification"):
+    if isinstance(result_payload, dict) and result_payload.get("direct_text"):
+        assistant_text = result_payload["direct_text"]
+    elif isinstance(result_payload, dict) and result_payload.get("needs_clarification"):
         assistant_text = result_payload.get("question") or "Please provide more details."
     else:
         system_prompt, messages = build_answer_prompt(result_payload)

@@ -126,7 +126,6 @@ def _series_from_profile(parsed_series: Optional[Any], profile_series: Optional[
 
     return profile_series
 
-
 # -----------------------------
 # Scoring / ranking helpers
 # -----------------------------
@@ -140,6 +139,7 @@ def _score_expr(
     written_by: Optional[str],
     ct_no: Optional[int],
     year: Optional[int],
+    sec: Optional[str],
 ) -> ColumnElement:
     """
     Builds a SQL expression that scores each row.
@@ -183,20 +183,26 @@ def _score_expr(
     if year is not None and hasattr(Model, "year"):
         score = score + case((Model.year == year, 20), else_=0)
 
+    # ✅ section match bonus (DO NOT FILTER by sec)
+    if sec and hasattr(Model, "sec"):
+        score = score + case((Model.sec == sec, 15), else_=0)
+
     return score
 
 
-def _apply_scope_filters(q, Model, dept: Optional[str], sec: Optional[str], series: Optional[Any]):
+def _apply_scope_filters(q, Model, dept: Optional[str], series: Optional[Any]):
     """
-    Hard filters (scope): dept, sec, series.
-    These should not be fuzzy.
+    Hard filters (scope):
+    - dept: ALWAYS hard
+    - series: hard (same batch)
+    NOTE: sec is NOT hard-filtered anymore.
     """
     if dept and hasattr(Model, "dept"):
         q = q.filter(Model.dept == dept)
-    if sec and hasattr(Model, "sec"):
-        q = q.filter(Model.sec == sec)
+
     if series is not None and hasattr(Model, "series"):
         q = q.filter(Model.series == series)
+
     return q
 
 
@@ -270,8 +276,8 @@ def _apply_phase_filters(
 
 def find_materials_handler(*, db: Session, parsed: FindMaterialsLLMOutput, student_profile: dict):
     # 0) Fill missing context (scope)
-    dept = _norm_text(parsed.dept) or _norm_text(student_profile.get("dept"))
-    sec = _norm_text(parsed.sec) or _norm_text(student_profile.get("section"))
+    dept = _norm_text(student_profile.get("dept"))  # ✅ ALWAYS from profile
+    sec = _norm_text(parsed.sec) or _norm_text(student_profile.get("section"))  # soft scoring only
 
     # 1) Pick model/table
     if parsed.material_type == MaterialType.class_note:
@@ -291,11 +297,11 @@ def find_materials_handler(*, db: Session, parsed: FindMaterialsLLMOutput, stude
     ct_no = getattr(parsed, "ct_no", None)
     year = getattr(parsed, "year", None)
 
-    series = _series_from_profile(getattr(parsed, "series", None), student_profile.get("series"), Model)
+    series = _series_from_profile(None, student_profile.get("series"), Model)  # ✅ ALWAYS from profile
 
-    # 3) Base query with hard scope filters
+    # 3) Base query with hard scope filters (NO sec filter)
     base = db.query(Model)
-    base = _apply_scope_filters(base, Model, dept, sec, series)
+    base = _apply_scope_filters(base, Model, dept, series)
 
     # 4) Two-phase search:
     #    A) strict, B) broad (if strict returns nothing)
@@ -321,6 +327,7 @@ def find_materials_handler(*, db: Session, parsed: FindMaterialsLLMOutput, stude
             written_by=written_by,
             ct_no=ct_no,
             year=year,
+            sec=sec,  # ✅ soft bonus
         ).label("match_score")
 
         # Order by score first, then created_at direction
