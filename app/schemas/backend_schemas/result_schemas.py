@@ -60,8 +60,8 @@ class ResultSheetBase(BaseModel):
         if value is None:
             return value
         allowed_depts = [
-            "CSE","EEE","ME","CE","IPE","ETE",
-            "URP","ARCH","BME","MTE","GCE","WRE"
+            "EEE","CSE","ETE","ECE","CE","URP",
+            "ARCH","BECM","ME","IPE","CME","MTE","MSE","CHE"
         ]
         if value.upper() not in allowed_depts:
             raise ValueError(f"Department must be one of {allowed_depts}")

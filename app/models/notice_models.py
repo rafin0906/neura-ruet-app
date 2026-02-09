@@ -4,7 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import Column, String, DateTime, ForeignKey, CheckConstraint, Text, Enum as SAEnum
 from sqlalchemy.orm import relationship
-
+from pgvector.sqlalchemy import Vector
 from app.db.database import Base
 
 
@@ -32,6 +32,9 @@ class Notice(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # vector embeddings for semantic search (pgvector)
+    vector_embeddings = Column(Vector(384), nullable=True)
 
     teacher = relationship("Teacher", backref="notices", foreign_keys=[created_by_teacher_id])
     cr = relationship("CR", backref="notices", foreign_keys=[created_by_cr_id])

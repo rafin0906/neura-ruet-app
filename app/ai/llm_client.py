@@ -1,47 +1,55 @@
+# app/ai/llm_client.py
 import os
-import json
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional, Any
+import httpx
 
-from groq import Groq
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+DEFAULT_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 
-class LLMClient:
-    def __init__(self):
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise RuntimeError("GROQ_API_KEY missing in environment")
+class GroqClient:
+    def __init__(self, timeout: float = 60.0):
+        if not GROQ_API_KEY:
+            raise RuntimeError("GROQ_API_KEY missing in env")
+        self.timeout = timeout
 
-        self.client = Groq(api_key=api_key)
-        self.model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-
-    def complete(
+    async def complete(
         self,
         system_prompt: str,
         messages: List[Dict[str, str]],
-        *,
-        json_mode: bool = False,
+        json_mode: bool,
         temperature: float = 0.2,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = 800,
     ) -> str:
         chat_messages = [{"role": "system", "content": system_prompt}]
-        chat_messages.extend(messages)
+        for m in messages:
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            if role not in ("user", "assistant", "system"):
+                role = "user"
+            chat_messages.append({"role": role, "content": str(content)})
 
-        kwargs = {
-            "model": self.model,
+        payload: Dict[str, Any] = {
+            "model": model or DEFAULT_MODEL,
             "messages": chat_messages,
             "temperature": temperature,
         }
-
-        # ✅ only force JSON when needed (planner)
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
+            payload["response_format"] = {"type": "json_object"}
 
-            # Groq requirement: the word "json" must appear in messages somewhere
-            has_json_word = any("json" in (m.get("content") or "").lower() for m in chat_messages)
-            if not has_json_word:
-                chat_messages[0]["content"] += "\n\nReturn valid JSON."
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        }
 
-        resp = self.client.chat.completions.create(**kwargs)
-        return resp.choices[0].message.content
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(GROQ_URL, headers=headers, json=payload)
+            if r.status_code >= 400:
+                raise RuntimeError(f"Groq {r.status_code}: {r.text}")
+            data = r.json()
 
-
-llm_client = LLMClient()
+        return data["choices"][0]["message"]["content"]

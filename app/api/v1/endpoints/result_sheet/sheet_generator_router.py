@@ -33,6 +33,26 @@ def create_result_sheet(
     db: Session = Depends(get_db),
     teacher=Depends(get_current_teacher),
 ):
+
+    exists = (
+        db.query(ResultSheet.id)
+        .filter(
+            ResultSheet.created_by_teacher_id == str(teacher.id),
+            ResultSheet.dept == payload.dept,
+            ResultSheet.section == payload.section,
+            ResultSheet.series == str(payload.series),
+            ResultSheet.course_code == payload.course_code,
+            ResultSheet.ct_no == payload.ct_no,
+        )
+        .first()
+    )
+    if exists:
+        raise HTTPException(
+            status_code=409,
+            detail="Result sheet already exists for this course and CT no."
+        )
+
+    
     sheet = ResultSheet(
         created_by_teacher_id=str(teacher.id),
         title=generate_result_sheet_title(payload),   #  generated on server

@@ -244,6 +244,7 @@ def profile_setup(
         "dept",
         "section",
         "series",
+        "roll_no",
         "mobile_no",
         "email",
         "profile_image",

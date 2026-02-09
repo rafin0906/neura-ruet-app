@@ -1,8 +1,13 @@
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
+from typing import List
 
 from app.db.database import get_db
-from app.schemas.backend_schemas.notice_schemas import TeacherNoticeCreate, NoticeResponse, TeacherNoticeUpdate
+from app.schemas.backend_schemas.notice_schemas import (
+    TeacherNoticeCreate,
+    NoticeResponse,
+    TeacherNoticeUpdate,
+)
 from app.services.dependencies import get_current_teacher
 from app.services.notice_service import (
     create_notice_by_teacher,
@@ -16,16 +21,23 @@ from app.models.teacher_models import Teacher
 router = APIRouter(prefix="/teacher/notices", tags=["Notices (Teacher)"])
 
 
-@router.post("", response_model=NoticeResponse)
+@router.post("", response_model=NoticeResponse, status_code=status.HTTP_201_CREATED)
 def upload_notice_teacher(
     payload: TeacherNoticeCreate,
     teacher: Teacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
 ):
+    """
+    Creates a notice by Teacher.
+
+    Handled inside service:
+    - created_by_role = "teacher"
+    - vector embeddings generated and stored
+    """
     return create_notice_by_teacher(db=db, payload=payload, teacher=teacher)
 
 
-@router.get("", response_model=list[NoticeResponse])
+@router.get("", response_model=List[NoticeResponse])
 def get_my_uploaded_notices_teacher(
     teacher: Teacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
@@ -43,6 +55,7 @@ def get_my_notice_by_id_teacher(
 ):
     return get_teacher_notice_by_id(db=db, teacher=teacher, notice_id=notice_id)
 
+
 @router.patch("/{notice_id}", response_model=NoticeResponse)
 def update_my_notice_teacher(
     notice_id: str,
@@ -50,6 +63,13 @@ def update_my_notice_teacher(
     teacher: Teacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
 ):
+    """
+    Updates a Teacher notice.
+
+    Handled inside service:
+    - fields updated selectively
+    - vector embeddings re-generated if content/targeting changed
+    """
     return update_teacher_notice(db=db, teacher=teacher, notice_id=notice_id, payload=payload)
 
 

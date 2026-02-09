@@ -1,7 +1,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Index, UniqueConstraint
+from sqlalchemy import (
+    Column,
+    String,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Index,
+    UniqueConstraint,
+    JSON,
+)
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
@@ -46,11 +56,18 @@ class SemesterQuestion(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
+    # vector embeddings for semantic search
+    vector_embeddings = Column(Vector(384), nullable=True)
+
     __table_args__ = (
         # ✅ prevent duplicates for same target group + course + year
         UniqueConstraint(
-            "course_code", "dept", "sec", "series", "year",
-            name="uq_semester_questions_course_group_year"
+            "course_code",
+            "dept",
+            "sec",
+            "series",
+            "year",
+            name="uq_semester_questions_course_group_year",
         ),
         Index("ix_semester_questions_uploaded_by_cr_id", "uploaded_by_cr_id"),
         Index("ix_semester_questions_course_code", "course_code"),

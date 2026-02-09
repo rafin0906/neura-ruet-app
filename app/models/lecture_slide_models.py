@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Column, String, DateTime, ForeignKey, Index
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
@@ -44,6 +45,9 @@ class LectureSlide(Base):
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
+
+    # vector embeddings for semantic search (pgvector)
+    vector_embeddings = Column(Vector(384), nullable=True)
 
     __table_args__ = (
         Index("ix_lecture_slides_uploaded_by_cr_id", "uploaded_by_cr_id"),

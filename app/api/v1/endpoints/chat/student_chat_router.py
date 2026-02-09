@@ -5,7 +5,6 @@ import traceback
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.params import Body
 from sqlalchemy.orm import Session
-from pydantic import ValidationError
 
 from app.db.database import get_db
 from app.models.chat_room_models import ChatRoom, SenderRole
@@ -19,14 +18,12 @@ from app.schemas.backend_schemas.chat_schemas import (
 )
 from app.services.dependencies import get_current_student
 from app.services.chat_service import _get_student_room_or_404
-
-from app.ai.tool_registry import get_tool
-from app.ai.llm_client import llm_client
-from app.services.ai_chat_service import run_tool_and_get_assistant_text
-from app.services.answer_llm_service import build_answer_prompt
+from app.ai.llm_client import GroqClient
+from app.services.ai_chat_service import run_tool_chat
 
 
 router = APIRouter(prefix="/students/chat", tags=["Student Chat"])
+
 
 def _auto_title_from_text(text: str, max_len: int = 60) -> str:
     text = " ".join((text or "").strip().split())
@@ -35,11 +32,9 @@ def _auto_title_from_text(text: str, max_len: int = 60) -> str:
     if len(text) <= max_len:
         return text
     cut = text[:max_len]
-    # avoid cutting mid-word
     if " " in cut:
         cut = cut.rsplit(" ", 1)[0]
     return cut + "…"
-
 
 
 @router.post("/rooms", response_model=ChatRoomOut, status_code=status.HTTP_201_CREATED)
@@ -51,12 +46,13 @@ def create_room(
     room = ChatRoom(
         owner_role=SenderRole.student,
         owner_student_id=str(student.id),
-        title=(payload.title.strip() if payload.title and payload.title.strip() else "New chat"),
+        title=(payload.title.strip() if payload.title and payload.title.strip() else "New Chat"),
     )
     db.add(room)
     db.commit()
     db.refresh(room)
     return room
+
 
 @router.get("/rooms", response_model=List[ChatRoomOut])
 def list_rooms(
@@ -97,7 +93,7 @@ def get_room_messages(
     response_model=MessageOut,
     status_code=status.HTTP_201_CREATED,
 )
-def send_message(
+async def send_message(
     room_id: str,
     payload: MessageCreateIn,
     db: Session = Depends(get_db),
@@ -105,71 +101,65 @@ def send_message(
 ):
     room = _get_student_room_or_404(db, room_id, str(student.id))
 
-    tool_name = payload.tool_name
-    if not tool_name:
+    if not payload.tool_name:
         raise HTTPException(status_code=400, detail="tool_name is required")
+    
+    ALLOWED_TOOLS = {"find_materials", "view_notices", "generate_cover_page", "check_marks"}
+    
+    if payload.tool_name not in ALLOWED_TOOLS:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid tool. Please select a valid tool: {', '.join(ALLOWED_TOOLS)}"
+        )
 
-    try:
-        get_tool(tool_name)
-    except Exception:
-        raise HTTPException(status_code=400, detail=f"Unknown tool: {tool_name}")
+    if not payload.content or not payload.content.strip():
+        raise HTTPException(status_code=400, detail="content is required")
 
-    # 1) save student message
+    user_text = payload.content.strip()
+
+    existing_student_msg = (
+        db.query(Message)
+        .filter(
+            Message.chat_room_id == room.id,
+            Message.sender_role == SenderRole.student,
+        )
+        .first()
+    )
+
+    is_first_message = existing_student_msg is None
+
+    if is_first_message and room.title == "New Chat":
+        room.title = _auto_title_from_text(user_text)
+        db.add(room)
+
     student_msg = Message(
         chat_room_id=room.id,
         sender_role=SenderRole.student,
         sender_student_id=str(student.id),
-        content=payload.content,
+        content=user_text,
     )
     db.add(student_msg)
+
     room.updated_at = datetime.utcnow()
     db.add(room)
     db.commit()
     db.refresh(student_msg)
 
-        # ✅ Auto-title on first message 
-    if room.title and room.title.strip().lower() == "new chat":
-        room.title = _auto_title_from_text(payload.content)
-        room.updated_at = datetime.utcnow()
-        db.add(room)
-        db.commit()
-        db.refresh(room)
-
-    # 2) planner tool pipeline (LLM JSON -> DB search bundle OR clarification)
     try:
-        result_payload = run_tool_and_get_assistant_text(
+        llm = GroqClient()
+
+        assistant_text = await run_tool_chat(
             db=db,
             room_id=room.id,
-            tool_name=tool_name,
-            user_text=payload.content,
-            student_obj=student,
-            llm=llm_client,
+            tool_name=payload.tool_name,
+            student=student,
+            user_text=user_text,
+            llm=llm,
         )
-    except (ValueError, ValidationError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except NotImplementedError as e:
-        raise HTTPException(status_code=501, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-    
 
-    # 3) build final assistant answer (do NOT save planner JSON)
-    if isinstance(result_payload, dict) and result_payload.get("direct_text"):
-        assistant_text = result_payload["direct_text"]
-    elif isinstance(result_payload, dict) and result_payload.get("needs_clarification"):
-        assistant_text = result_payload.get("question") or "Please provide more details."
-    else:
-        system_prompt, messages = build_answer_prompt(result_payload)
-
-        assistant_text = llm_client.complete(
-            system_prompt=system_prompt,
-            messages=messages,
-            json_mode=False,     #  natural language
-            temperature=0.7,
-        )
-
-    # 4) save only final answer
     assistant_msg = Message(
         chat_room_id=room.id,
         sender_role=SenderRole.assistant,
@@ -179,8 +169,14 @@ def send_message(
 
     room.updated_at = datetime.utcnow()
     db.add(room)
-
     db.commit()
     db.refresh(assistant_msg)
 
     return assistant_msg
+
+
+
+
+
+
+

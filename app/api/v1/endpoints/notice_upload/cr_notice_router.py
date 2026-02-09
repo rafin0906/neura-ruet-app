@@ -1,8 +1,13 @@
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
+from typing import List
 
 from app.db.database import get_db
-from app.schemas.backend_schemas.notice_schemas import CRNoticeCreate, NoticeResponse, CRNoticeUpdate
+from app.schemas.backend_schemas.notice_schemas import (
+    CRNoticeCreate,
+    NoticeResponse,
+    CRNoticeUpdate,
+)
 from app.services.dependencies import get_current_cr
 from app.services.notice_service import (
     create_notice_by_cr,
@@ -16,16 +21,24 @@ from app.models.cr_models import CR
 router = APIRouter(prefix="/cr/notices", tags=["Notices (CR)"])
 
 
-@router.post("", response_model=NoticeResponse)
+@router.post("", response_model=NoticeResponse, status_code=status.HTTP_201_CREATED)
 def upload_notice_cr(
     payload: CRNoticeCreate,
     cr: CR = Depends(get_current_cr),
     db: Session = Depends(get_db),
 ):
+    """
+    Creates a notice by CR.
+
+    Handled inside service:
+    - dept/sec/series resolved from CR profile
+    - created_by_role = "cr"
+    - vector embeddings generated and stored
+    """
     return create_notice_by_cr(db=db, payload=payload, cr=cr)
 
 
-@router.get("", response_model=list[NoticeResponse])
+@router.get("", response_model=List[NoticeResponse])
 def get_my_uploaded_notices_cr(
     cr: CR = Depends(get_current_cr),
     db: Session = Depends(get_db),
@@ -44,7 +57,6 @@ def get_my_notice_by_id_cr(
     return get_cr_notice_by_id(db=db, cr=cr, notice_id=notice_id)
 
 
-
 @router.patch("/{notice_id}", response_model=NoticeResponse)
 def update_my_notice_cr(
     notice_id: str,
@@ -52,6 +64,13 @@ def update_my_notice_cr(
     cr: CR = Depends(get_current_cr),
     db: Session = Depends(get_db),
 ):
+    """
+    Updates a CR notice.
+
+    Handled inside service:
+    - fields updated selectively
+    - vector embeddings re-generated if content changed
+    """
     return update_cr_notice(db=db, cr=cr, notice_id=notice_id, payload=payload)
 
 

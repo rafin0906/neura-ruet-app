@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Literal
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional,Literal
 from datetime import datetime
 
 
@@ -11,6 +11,40 @@ class TeacherNoticeCreate(BaseModel):
     sec: str
     series: str
 
+    @field_validator("dept")
+    def validate_dept(cls, value):
+        if value is None:
+            return value
+        allowed_depts = [
+            "CSE","EEE","ME","CE","IPE","ETE",
+            "URP","ARCH","BME","MTE","GCE","WRE"
+        ]
+        if value.upper() not in allowed_depts:
+            raise ValueError(f"Department must be one of {allowed_depts}")
+        return value.upper()
+
+    @field_validator("series")
+    def validate_series(cls, value):
+        if value is None:
+            return value
+
+        try:
+            value_int = int(value)
+        except ValueError:
+            raise ValueError("Series must be a number between 19 and 25")
+
+        if value_int < 19 or value_int > 25:
+            raise ValueError("Series must be between 19 and 25")
+
+        return value  # keep original string (DO NOT change business logic)
+
+    @field_validator("sec")
+    def validate_section(cls, value):
+        if value not in (None, "A", "B", "C"):
+            raise ValueError("Section must be A, B, C or None")
+        return value
+
+        return value
 
 class CRNoticeCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)

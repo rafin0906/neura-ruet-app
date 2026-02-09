@@ -3,6 +3,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Column, String, DateTime, ForeignKey, Index
+
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
@@ -52,6 +54,7 @@ class ClassNote(Base):
         nullable=False,
     )
 
-    __table_args__ = (
-        Index("ix_class_notes_uploaded_by_cr_id", "uploaded_by_cr_id"),
-    )
+    # vector embeddings for semantic search (pgvector)
+    vector_embeddings = Column(Vector(384), nullable=True)
+
+    __table_args__ = (Index("ix_class_notes_uploaded_by_cr_id", "uploaded_by_cr_id"),)

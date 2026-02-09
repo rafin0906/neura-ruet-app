@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from pydantic_settings import BaseSettings
 
@@ -23,7 +24,7 @@ from app.models.result_entry_models import ResultEntry
 
 
 from app.api.v1.api import api_router
-from app.ai.tool_registry import init_tools
+from app.ai.tools_init import init_tools
 # Create all tables
 # Base.metadata.create_all(bind=engine)
 
@@ -41,3 +42,10 @@ def read_root():
 @app.get("/ping")
 def read_root():
     return {"message": "route ping successful!"}
+
+
+app.mount(
+    "/downloads",
+    StaticFiles(directory="app/assets/pdf"),
+    name="downloads",
+)

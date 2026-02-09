@@ -3,30 +3,58 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from app.models.notice_models import Notice
-from app.schemas.backend_schemas.notice_schemas import TeacherNoticeCreate, CRNoticeCreate, TeacherNoticeUpdate, CRNoticeUpdate
+from app.schemas.backend_schemas.notice_schemas import (
+    TeacherNoticeCreate,
+    CRNoticeCreate,
+    TeacherNoticeUpdate,
+    CRNoticeUpdate,
+)
 from app.models.teacher_models import Teacher
 from app.models.cr_models import CR
 from app.models.student_models import Student
 
+from app.ai.embedding_client import embed_texts
+
+import logging
+import asyncio
+
+logger = logging.getLogger(__name__)
 
 # -------------------------
 # CREATE
 # -------------------------
 def create_notice_by_teacher(db: Session, payload: TeacherNoticeCreate, teacher: Teacher) -> Notice:
     notice = Notice(
-        title=payload.title,
-        notice_message=payload.notice_message,
+        title=payload.title.strip(),
+        notice_message=payload.notice_message.strip(),
         created_by_role="teacher",
         created_by_teacher_id=str(teacher.id),
         created_by_cr_id=None,
-        dept=payload.dept,
-        sec=payload.sec,
+        dept=str(payload.dept),
+        sec=str(payload.sec),
         series=str(payload.series),
     )
+
+    # ✅ generate embeddings (do not fail upload if embedding fails)
+    try:
+        teacher_name = getattr(teacher, "full_name", "") or getattr(teacher, "name", "")
+        template = (
+            f"Class/Dept Notice posted by Teacher {teacher_name}. "
+            f"Notice audience: dept {notice.dept}, section {notice.sec}, series {notice.series}. "
+            f"Title: {notice.title}. "
+            f"Message: {notice.notice_message}."
+        )
+        emb = asyncio.run(embed_texts([template]))[0]
+        notice.vector_embeddings = emb
+    except Exception:
+        logger.exception("Embedding generation failed")
+        notice.vector_embeddings = None
+
     db.add(notice)
     db.commit()
     db.refresh(notice)
     return notice
+
 
 
 def create_notice_by_cr(db: Session, payload: CRNoticeCreate, cr: CR) -> Notice:
@@ -41,8 +69,8 @@ def create_notice_by_cr(db: Session, payload: CRNoticeCreate, cr: CR) -> Notice:
         )
 
     notice = Notice(
-        title=payload.title,
-        notice_message=payload.notice_message,
+        title=payload.title.strip(),
+        notice_message=payload.notice_message.strip(),
         created_by_role="cr",
         created_by_cr_id=str(cr.id),
         created_by_teacher_id=None,
@@ -50,6 +78,24 @@ def create_notice_by_cr(db: Session, payload: CRNoticeCreate, cr: CR) -> Notice:
         sec=str(sec),
         series=str(series),
     )
+
+    # ✅ generate embeddings (do not fail upload if embedding fails)
+    try:
+        cr_name = getattr(cr, "full_name", "") or getattr(cr, "name", "")
+        cr_roll = str(getattr(cr, "roll_no", "") or getattr(cr, "roll", ""))
+        template = (
+            f"Class/Dept Notice posted by CR {cr_name} (roll {cr_roll}). "
+            f"CR profile: dept {notice.dept}, section {notice.sec}, series {notice.series}. "
+            f"Title: {notice.title}. "
+            f"Message: {notice.notice_message}."
+        )
+
+        logger.info("Embedding template (teacher create): %s", template)
+        emb = asyncio.run(embed_texts([template]))[0]
+        notice.vector_embeddings = emb
+    except Exception:
+        notice.vector_embeddings = None
+
     db.add(notice)
     db.commit()
     db.refresh(notice)
@@ -144,12 +190,36 @@ def update_cr_notice(db: Session, cr: CR, notice_id: str, payload: CRNoticeUpdat
         .first()
     )
     if not notice:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notice not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notice not found",
+        )
+
+    updated = False
 
     if payload.title is not None:
-        notice.title = payload.title
+        notice.title = payload.title.strip()
+        updated = True
+
     if payload.notice_message is not None:
-        notice.notice_message = payload.notice_message
+        notice.notice_message = payload.notice_message.strip()
+        updated = True
+
+    # ✅ re-generate embeddings only if something changed
+    if updated:
+        try:
+            cr_name = getattr(cr, "full_name", "") or getattr(cr, "name", "")
+            cr_roll = str(getattr(cr, "roll_no", "") or getattr(cr, "roll", ""))
+            template = (
+                f"Class/Dept Notice posted by CR {cr_name} (roll {cr_roll}). "
+                f"CR profile: dept {notice.dept}, section {notice.sec}, series {notice.series}. "
+                f"Title: {notice.title}. "
+                f"Message: {notice.notice_message}."
+            )
+            emb = asyncio.run(embed_texts([template]))[0]
+            notice.vector_embeddings = emb
+        except Exception:
+            pass
 
     db.commit()
     db.refresh(notice)
@@ -181,18 +251,42 @@ def update_teacher_notice(db: Session, teacher: Teacher, notice_id: str, payload
     if not notice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notice not found")
 
-    if payload.title is not None:
-        notice.title = payload.title
-    if payload.notice_message is not None:
-        notice.notice_message = payload.notice_message
+    updated = False
 
-    # Teacher can change targeting (optional fields)
+    if payload.title is not None:
+        notice.title = payload.title.strip()
+        updated = True
+
+    if payload.notice_message is not None:
+        notice.notice_message = payload.notice_message.strip()
+        updated = True
+
     if payload.dept is not None:
-        notice.dept = payload.dept
+        notice.dept = str(payload.dept)
+        updated = True
+
     if payload.sec is not None:
-        notice.sec = payload.sec
+        notice.sec = str(payload.sec)
+        updated = True
+
     if payload.series is not None:
         notice.series = str(payload.series)
+        updated = True
+
+    # ✅ re-generate embeddings only if something changed
+    if updated:
+        try:
+            teacher_name = getattr(teacher, "full_name", "") or getattr(teacher, "name", "")
+            template = (
+                f"Class/Dept Notice posted by Teacher {teacher_name}. "
+                f"Notice audience: dept {notice.dept}, section {notice.sec}, series {notice.series}. "
+                f"Title: {notice.title}. "
+                f"Message: {notice.notice_message}."
+            )
+            emb = asyncio.run(embed_texts([template]))[0]
+            notice.vector_embeddings = emb
+        except Exception:
+            pass
 
     db.commit()
     db.refresh(notice)
@@ -210,4 +304,3 @@ def delete_teacher_notice(db: Session, teacher: Teacher, notice_id: str) -> None
 
     db.delete(notice)
     db.commit()
-
