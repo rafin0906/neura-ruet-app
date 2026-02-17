@@ -43,7 +43,7 @@ def generate_mark_sheet(
     *,
     dept: str,
     series: str,
-    section: str,
+    section: Optional[str] = None,
     course_code: str,
     course_name: str,
     from_roll: Union[str, int],
@@ -161,7 +161,16 @@ def generate_mark_sheet(
     story.append(Spacer(1, 10))
 
     story.append(Paragraph(
-        f"<b>Class Test Marks ({section} Section), {course_code} : {course_name}</b>",
+        (
+            f"<b>Class Test Marks ({str(section).strip().upper()} Section), {course_code} : {course_name}</b>"
+            if (
+                section is not None
+                and str(section).strip() != ""
+                and str(section).strip().lower() not in {"none", "null"}
+                and str(section).strip().upper() in {"A", "B", "C"}
+            )
+            else f"<b>Class Test Marks, {course_code} : {course_name}</b>"
+        ),
         ParagraphStyle(
             "course",
             parent=styles["Normal"],

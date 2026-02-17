@@ -13,6 +13,7 @@ from app.services.notice_service import (
     create_notice_by_cr,
     get_cr_notices,
     get_cr_notice_by_id,
+    get_cr_feed_teacher_notices,
     update_cr_notice,
     delete_cr_notice,
 )
@@ -46,6 +47,17 @@ def get_my_uploaded_notices_cr(
     limit: int = Query(50, ge=1, le=200),
 ):
     return get_cr_notices(db=db, cr=cr, skip=skip, limit=limit)
+
+
+@router.get("/feed", response_model=List[NoticeResponse])
+def get_teacher_notices_feed_for_cr(
+    cr: CR = Depends(get_current_cr),
+    db: Session = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """CR feed: teacher notices for CR's dept/series and section (plus sectionless)."""
+    return get_cr_feed_teacher_notices(db=db, cr=cr, skip=skip, limit=limit)
 
 
 @router.get("/{notice_id}", response_model=NoticeResponse)

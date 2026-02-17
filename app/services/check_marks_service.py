@@ -3,7 +3,7 @@
 import json
 from typing import Dict, List, Any, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 
 from app.ai.sys_prompts import CHECK_MARKS_JSON_PROMPT, CHECK_MARKS_ANSWER_PROMPT
 from app.schemas.ai_schemas.check_marks_schema import CheckMarksExtracted
@@ -42,12 +42,15 @@ def _normalize_course_code(raw: str) -> str:
     return ""
 
 
-def _roll_last3(roll_full: str) -> str:
-    # "2303137" -> "137"
+def _course_code_key(code: str) -> str:
+    return "".join(ch for ch in str(code).upper() if ch.isalnum())
+
+
+def _normalize_roll(roll_full: str) -> str:
+    # Keep the full numeric roll. Example: "2303137" -> "2303137"
     if not roll_full:
         return ""
-    digits = "".join(ch for ch in roll_full if ch.isdigit())
-    return digits[-3:] if len(digits) >= 3 else digits
+    return "".join(ch for ch in str(roll_full) if ch.isdigit())
 
 
 async def _extract_json(llm: GroqClient, user_text: str, history: List[Dict[str, str]]) -> CheckMarksExtracted:
@@ -130,33 +133,60 @@ async def run_check_marks_pipeline(
     std_series = str(getattr(student, "series", "") or "")
     std_roll_full = getattr(student, "roll_no", None) or getattr(student, "roll", None) or ""
 
-    roll_last3 = _roll_last3(str(std_roll_full))
+    roll_full_digits = _normalize_roll(str(std_roll_full))
+    if not roll_full_digits:
+        return "Your roll number is not set in your profile. Please update your profile roll number."
 
 
-    # 3) Query result_sheets with strict student scope
-    sheet = (
-        db.query(ResultSheet)
-        .filter(ResultSheet.dept == std_dept)
-        .filter(ResultSheet.section == std_section)
-        .filter(ResultSheet.series == std_series)
-        .filter(ResultSheet.course_code == extracted.course_code)
-        .filter(ResultSheet.ct_no == extracted.ct_no)
-        .order_by(desc(ResultSheet.created_at))
-        .first()
-    )
+    # 3) Query result_sheets with student scope
+    # If student's section is missing, do NOT block; try to find the sheet that contains their roll entry.
+    sheet = None
+    entry = None
+    course_key = _course_code_key(extracted.course_code)
+    if std_section:
+        sheet = (
+            db.query(ResultSheet)
+            .filter(ResultSheet.dept == std_dept)
+            .filter(ResultSheet.section == std_section)
+            .filter(ResultSheet.series == std_series)
+            .filter(func.regexp_replace(func.upper(ResultSheet.course_code), r"[^A-Z0-9]", "", "g") == course_key)
+            .filter(ResultSheet.ct_no == extracted.ct_no)
+            .order_by(desc(ResultSheet.created_at))
+            .first()
+        )
+        if sheet:
+            entry = (
+                db.query(ResultEntry)
+                .filter(ResultEntry.result_sheet_id == sheet.id)
+                .filter(ResultEntry.roll_no == roll_full_digits)
+                .first()
+            )
+    else:
+        candidate_sheets = (
+            db.query(ResultSheet)
+            .filter(ResultSheet.dept == std_dept)
+            .filter(ResultSheet.series == std_series)
+            .filter(func.regexp_replace(func.upper(ResultSheet.course_code), r"[^A-Z0-9]", "", "g") == course_key)
+            .filter(ResultSheet.ct_no == extracted.ct_no)
+            .order_by(desc(ResultSheet.created_at))
+            .all()
+        )
+        for s in candidate_sheets:
+            e = (
+                db.query(ResultEntry)
+                .filter(ResultEntry.result_sheet_id == s.id)
+                .filter(ResultEntry.roll_no == roll_full_digits)
+                .first()
+            )
+            if e:
+                sheet = s
+                entry = e
+                break
 
     if not sheet:
-        return f"No result sheet found for {extracted.course_code} CT-{extracted.ct_no} in your section/series."
+        return f"No result sheet found for {extracted.course_code} CT-{extracted.ct_no} in your series."
     
     course_name = sheet.course_name or "Unknown"
-
-    # 4) Query result_entries for only THIS student
-    entry = (
-        db.query(ResultEntry)
-        .filter(ResultEntry.result_sheet_id == sheet.id)
-        .filter(ResultEntry.roll_no == roll_last3)
-        .first()
-    )
 
     if not entry:
         return f"Your marks for {extracted.course_code} CT-{extracted.ct_no} are not available yet (or not published for your roll)."
@@ -179,14 +209,40 @@ async def run_check_marks_pipeline(
         "teacher_name": teacher_name,
     }
 
+    # Debug log: record which roll and marks were fetched from DB
+    try:
+        logger.info(
+            "check_marks: fetched -> roll=%s sheet_id=%s ct=%s marks=%s",
+            roll_full_digits,
+            getattr(sheet, 'id', None),
+            extracted.ct_no,
+            marks,
+        )
+    except Exception:
+        logger.exception("check_marks: failed to log fetched marks info")
+
+    # Also log the exact DB context we will provide to the LLM
+    try:
+        logger.info("check_marks: LLM DB_CONTEXT: %s", json.dumps(grounded_ctx))
+    except Exception:
+        logger.exception("check_marks: failed to log DB_CONTEXT")
+
+    # SECURITY: Do NOT include user messages or conversation history when generating
+    # the grounded answer. The model must respond strictly from DB_CONTEXT and must
+    # not be influenced by any user claims (e.g., "I got 25").
     answer = await llm.complete(
         system_prompt=CHECK_MARKS_ANSWER_PROMPT,
-        messages=history + [
-            {"role": "user", "content": user_text},
-            {"role": "assistant", "content": f"DB_CONTEXT: {json.dumps(grounded_ctx)}"},
-        ],
+        messages=[{"role": "assistant", "content": f"DB_CONTEXT: {json.dumps(grounded_ctx)}"}],
         json_mode=False,
-        temperature=0.2,
+        temperature=0.0,
         max_tokens=120,
     )
+
+    # Trim whitespace to avoid extra leading/trailing spaces in the UI message
+    try:
+        if isinstance(answer, str):
+            answer = answer.strip()
+    except Exception:
+        logger.exception("check_marks: failed to trim answer")
+
     return answer

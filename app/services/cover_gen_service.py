@@ -26,7 +26,6 @@ COMMON_REQUIRED = [
     "full_name",
     "roll_no",
     "dept",
-    "section",
     "series",
 ]
 
@@ -271,8 +270,8 @@ async def run_cover_generator_pipeline(
 
 
     # In production, MUST ADD Hosting Server URL before the download path, e.g.:
-    # download_url = f"https://yourdomain.com/downloads/{filename}"
-    download_url = f"/downloads/{filename}"
+    download_url = f"https://yourdomain.com/downloads/{filename}"
+    # download_url = f"/downloads/{filename}"
 
     return (
         "🎉 Cover page generated successfully.\n\n"

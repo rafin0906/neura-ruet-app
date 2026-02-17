@@ -27,7 +27,7 @@ class Notice(Base):
     created_by_cr_id = Column(String(36), ForeignKey("crs.id", ondelete="SET NULL"), nullable=True)
 
     dept = Column(String, nullable=False)
-    sec = Column(String, nullable=False)
+    sec = Column(String, nullable=True)
     series = Column(String, nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

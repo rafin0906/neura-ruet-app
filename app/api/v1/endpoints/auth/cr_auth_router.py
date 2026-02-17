@@ -14,8 +14,15 @@ from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 
 from app.db.database import get_db
 from app.models.cr_models import CR
-from app.schemas.backend_schemas.cr_schemas import CRLoginSchema, CRSchema, CRProfileSetupMeResponse
-from app.schemas.backend_schemas.utils_schema import ForgetPasswordSchema, ResetPasswordSchema
+from app.schemas.backend_schemas.cr_schemas import (
+    CRLoginSchema,
+    CRSchema,
+    CRProfileSetupMeResponse,
+)
+from app.schemas.backend_schemas.utils_schema import (
+    ForgetPasswordSchema,
+    ResetPasswordSchema,
+)
 
 from app.utils.hashing import (
     get_password_hash,
@@ -52,7 +59,9 @@ def sanitize_otp_store() -> dict:
     for email, entry in otp_store.items():
         sanitized[email] = {
             "otp": _mask_otp(entry.get("otp")),
-            "expires": entry.get("expires").isoformat() if entry.get("expires") else None,
+            "expires": (
+                entry.get("expires").isoformat() if entry.get("expires") else None
+            ),
         }
     return sanitized
 
@@ -170,8 +179,6 @@ def cr_reset_password(payload: ResetPasswordSchema, db: Session = Depends(get_db
     return {"message": "Password reset successful"}
 
 
-
-
 @router.get("/profile-setup/me", response_model=CRProfileSetupMeResponse)
 def cr_profile_setup_me(cr: CR = Depends(get_cr_for_profile_setup)):
     return cr
@@ -187,21 +194,19 @@ def cr_profile_setup(
 
     if payload.roll_no and payload.roll_no != cr.roll_no:
         exists = (
-            db.query(CR)
-            .filter(CR.roll_no == payload.roll_no, CR.id != cr.id)
-            .first()
+            db.query(CR).filter(CR.roll_no == payload.roll_no, CR.id != cr.id).first()
         )
         if exists:
-            raise HTTPException(status_code=409, detail="Roll no already used by another CR")
+            raise HTTPException(
+                status_code=409, detail="Roll no already used by another CR"
+            )
 
     if payload.email and payload.email != cr.email:
-        exists = (
-            db.query(CR)
-            .filter(CR.email == payload.email, CR.id != cr.id)
-            .first()
-        )
+        exists = db.query(CR).filter(CR.email == payload.email, CR.id != cr.id).first()
         if exists:
-            raise HTTPException(status_code=409, detail="Email already used by another CR")
+            raise HTTPException(
+                status_code=409, detail="Email already used by another CR"
+            )
 
     if payload.mobile_no and payload.mobile_no != cr.mobile_no:
         exists = (
@@ -211,7 +216,6 @@ def cr_profile_setup(
         )
         if exists:
             raise HTTPException(status_code=409, detail="Mobile number already used")
-
 
     # ✅ update allowed fields only
     updatable = (
@@ -225,10 +229,10 @@ def cr_profile_setup(
         "cr_no",
     )
 
+    fields_set = getattr(payload, "model_fields_set", set())
     for field in updatable:
-        val = getattr(payload, field, None)
-        if val is not None:
-            setattr(cr, field, val)
+        if field in fields_set:
+            setattr(cr, field, getattr(payload, field))
 
     # 🔒 invalidate setup token only if still present
     if cr.setup_token:
@@ -249,7 +253,9 @@ def cr_profile_setup(
 
     cr.refresh_token_id = refresh_token_id
     cr.refresh_token_hash = hash_refresh_token(refresh_token)
-    cr.refresh_token_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    cr.refresh_token_expires_at = datetime.utcnow() + timedelta(
+        days=REFRESH_TOKEN_EXPIRE_DAYS
+    )
 
     # ✅ commit safely (race-condition proof)
     try:
@@ -290,7 +296,9 @@ def cr_refresh_access_token(
 ):
     # 0) refresh token from Authorization: Bearer <refresh_token>
     if not credentials:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authorization header missing")
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Authorization header missing"
+        )
 
     refresh_token = credentials.credentials
 
@@ -324,7 +332,10 @@ def cr_refresh_access_token(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
     # 5) refresh token expiry check
-    if not cr.refresh_token_expires_at or datetime.utcnow() > cr.refresh_token_expires_at:
+    if (
+        not cr.refresh_token_expires_at
+        or datetime.utcnow() > cr.refresh_token_expires_at
+    ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token expired")
 
     # 6) bind refresh to the expired access token + token_version
@@ -350,7 +361,9 @@ def cr_refresh_access_token(
 
     cr.refresh_token_id = new_refresh_token_id
     cr.refresh_token_hash = hash_refresh_token(new_refresh_token)
-    cr.refresh_token_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    cr.refresh_token_expires_at = datetime.utcnow() + timedelta(
+        days=REFRESH_TOKEN_EXPIRE_DAYS
+    )
 
     db.commit()
     db.refresh(cr)
@@ -361,7 +374,6 @@ def cr_refresh_access_token(
         "refresh_token_id": new_refresh_token_id,
         "token_type": "bearer",
     }
-
 
 
 @router.post("/logout")

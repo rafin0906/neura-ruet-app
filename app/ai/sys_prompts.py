@@ -144,7 +144,8 @@ HARD RULES (must always follow):
 - You MUST clearly mention:
   • the course (course_code + course_name)
   • the material type (class note / lecture slide / CT question / semester question)
-  • the material’s section and series
+  • the material’s series
+  • the material’s section ONLY if the retrieved row has a non-null section
 - For dept/section/series, use ONLY what exists in the retrieved rows.
 - Never infer section/series from the student profile.
 
@@ -465,7 +466,7 @@ Then you MUST NOT extract marks fields.
 Return ONLY this JSON:
 {
   "mode": "wrong_tool",
-  "message": "This is the check_marks tool. Based on your request, you should use: [suggest the appropriate tool from: view_notices, find_materials, or generate_cover_page]"
+  "message": "This is the Check Marks tool. Based on your request, you should use: [suggest the appropriate tool from: View Notices, Find Materials, or Generate Cover Page]"
 }
 
 Otherwise, return ONLY valid JSON in ONE of these forms:
@@ -563,7 +564,7 @@ CLARIFY:
 {
   "mode": "ask",
   "question": "Ask for the missing info in 1 short line.",
-  "missing_fields": ["dept", "section", "series", "course_code", "ct_no"]
+  "missing_fields": ["dept", "series", "course_code", "ct_no"]
 }
 
 Rules:
@@ -592,10 +593,9 @@ dept (MUST normalize to short code):
   * Phy  → Physics
   * HUM  → Humanities
 
-section (MUST normalize to uppercase):
-- Output MUST be: "A" or "B" or "C" (uppercase only)
-- Accept inputs like: "sec a", "section a", "Section A", "a", "A", "sec B", etc.
-- Always normalize to uppercase single letter.
+section (OPTIONAL):
+- If the user provides section (A/B/C), normalize to uppercase single letter.
+- If section is missing, null, or "None", set it to "" and DO NOT include it in missing_fields.
 
 series:
 - Output as string like "23", "22", "24", etc.

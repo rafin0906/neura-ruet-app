@@ -198,6 +198,7 @@ def _draw_wrapped_block_in_cell(
 
     c.restoreState()
 
+
 def _draw_image_rotated(
     c: canvas.Canvas,
     img_path: str,
@@ -292,7 +293,7 @@ def generate_ruet_cover_pdf(
     # --- Top corner doodles (left rectangle + right flask/tube) ---
     rect_path = resolve_path("../assets/images/rectangle.png") or "../assets/images/rectangle.png"
     flask_path = resolve_path("../assets/images/doodle_1.png") or "../assets/images/doodle_1.png"
-    tube_path  = resolve_path("../assets/images/doodle_2.png") or "../assets/images/doodle_2.png"
+    tube_path = resolve_path("../assets/images/doodle_2.png") or "../assets/images/doodle_2.png"
         
     # LEFT rectangle
     _draw_image_rotated(
@@ -495,14 +496,19 @@ def generate_ruet_cover_pdf(
     font_body = "Times-Roman"
     size_body = 12
 
-    left_block = "\n".join(
-        [
-            full_name,
-            f"Roll:  {roll_no}",
-            f"Section: {section}",
-            f"Session: {session}",
-        ]
-    )
+    # Build left block with conditional section
+    _sec = None if section is None else str(section).strip()
+    _has_section = bool(_sec) and _sec.lower() not in {"none", "null"}
+
+    left_lines = [
+        full_name,
+        f"Roll:  {roll_no}",
+    ]
+    if _has_section:
+        left_lines.append(f"Section: {_sec}")
+    left_lines.append(f"Session: {session}")
+
+    left_block = "\n".join(left_lines)
 
     right_block = "\n".join(
         [

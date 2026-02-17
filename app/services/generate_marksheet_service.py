@@ -1,11 +1,13 @@
 # app/services/generate_marksheet_service.py
 import json
 import os
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any
 
 from fastapi import HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.sys_prompts import MARKSHEET_JSON_PROMPT
@@ -20,6 +22,10 @@ def _normalize_course_code(code: str) -> str:
         # naive split: ABC1234 -> ABC-1234
         c = f"{c[:3]}-{c[3:]}"
     return c
+
+
+def _course_code_key(code: str) -> str:
+    return "".join(ch for ch in str(code).upper() if ch.isalnum())
 
 
 def _dept_full_name(dept_code: str) -> str:
@@ -55,6 +61,7 @@ async def run_generate_marksheet_pipeline(
     llm,
 ) -> str:
     # 1) extract JSON
+    logger = logging.getLogger(__name__)
     raw = await llm.complete(
         system_prompt=MARKSHEET_JSON_PROMPT,
         messages=history + [{"role": "user", "content": user_text}],
@@ -62,6 +69,16 @@ async def run_generate_marksheet_pipeline(
         temperature=0.1,
         max_tokens=250,
     )
+
+    # Log raw LLM output and the messages used for debugging why the tool may decide the
+    # request is out-of-scope. This helps trace cases where the system prompt guard returns
+    # a 'mode':'ask' response (e.g., "Sorry, this request does not fall under the marksheet generation tool's scope.").
+    try:
+        logger.debug("generate_marksheet: llm raw response: %s", raw)
+        logger.debug("generate_marksheet: history+user_text: %s", history + [{"role": "user", "content": user_text}])
+    except Exception:
+        # Avoid raising in production if logging fails
+        pass
 
     try:
         data = json.loads(raw)
@@ -72,15 +89,17 @@ async def run_generate_marksheet_pipeline(
         return data.get("question", "Please provide missing info.")
 
     # 2) validate fields
-    required = ["dept", "section", "series", "course_code", "ct_no"]
+    # section is OPTIONAL: if absent/empty, we'll try to infer it from matching sheets.
+    required = ["dept", "series", "course_code", "ct_no"]
     missing = [k for k in required if not data.get(k)]
     if missing:
         return f"Missing: {', '.join(missing)}"
 
     dept = str(data["dept"]).upper().strip()
-    section = str(data["section"]).upper().strip()
+    section = str(data.get("section") or "").upper().strip()
     series = str(data["series"]).strip()
     course_code = _normalize_course_code(str(data["course_code"]))
+    course_key = _course_code_key(course_code)
     ct_list = data["ct_no"]
 
     if not isinstance(ct_list, list) or not all(isinstance(x, int) for x in ct_list):
@@ -89,19 +108,27 @@ async def run_generate_marksheet_pipeline(
     teacher_id = str(teacher.id)
 
     # 3) fetch all matching sheets for those CTs
-    sheets: List[ResultSheet] = (
+    base_query = (
         db.query(ResultSheet)
         .options(selectinload(ResultSheet.entries))
         .filter(
             ResultSheet.created_by_teacher_id == teacher_id,
             ResultSheet.dept == dept,
-            ResultSheet.section == section,
             ResultSheet.series == series,
-            ResultSheet.course_code == course_code,
+            func.regexp_replace(func.upper(ResultSheet.course_code), r"[^A-Z0-9]", "", "g") == course_key,
             ResultSheet.ct_no.in_(ct_list),
         )
-        .all()
     )
+
+    if section:
+        sheets: List[ResultSheet] = base_query.filter(ResultSheet.section == section).all()
+    else:
+        sheets = base_query.all()
+        sections_found = sorted({(s.section or "").upper().strip() for s in sheets if getattr(s, "section", None)})
+        if len(sections_found) > 1:
+            return "Which section is this marksheet for? (A/B/C)"
+        if len(sections_found) == 1:
+            section = sections_found[0]
 
     if not sheets:
         return "No matching result sheets found for your request."
@@ -166,8 +193,8 @@ async def run_generate_marksheet_pipeline(
 
     # 8) return download URL with formatted success message
     # In production, MUST ADD Hosting Server URL before the download path, e.g.:
-    # download_url = f"https://yourdomain.com/downloads/{filename}"
-    download_url = f"/downloads/{filename}"
+    download_url = f"https://yourdomain.com/downloads/{filename}"
+    # download_url = f"/downloads/{filename}"
 
     return (
         "🎉 CT Marksheet generated successfully.\n\n"

@@ -1,6 +1,7 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from sqlalchemy import or_
 
 from app.models.notice_models import Notice
 from app.schemas.backend_schemas.notice_schemas import (
@@ -31,7 +32,7 @@ def create_notice_by_teacher(db: Session, payload: TeacherNoticeCreate, teacher:
         created_by_teacher_id=str(teacher.id),
         created_by_cr_id=None,
         dept=str(payload.dept),
-        sec=str(payload.sec),
+        sec=payload.sec,
         series=str(payload.series),
     )
 
@@ -62,11 +63,24 @@ def create_notice_by_cr(db: Session, payload: CRNoticeCreate, cr: CR) -> Notice:
     sec = getattr(cr, "section", None) or getattr(cr, "sec", None)
     series = getattr(cr, "series", None)
 
-    if not (dept and sec and series):
+    if not (dept and series):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="CR profile missing dept/sec/series",
+            detail="CR profile missing dept/series",
         )
+
+    # Normalize section: treat "None" string as NULL; otherwise keep A/B/C.
+    if isinstance(sec, str):
+        cleaned = sec.strip()
+        if cleaned == "" or cleaned.lower() in {"none", "null"}:
+            sec = None
+        else:
+            sec_upper = cleaned.upper()
+            if sec_upper in {"A", "B", "C"}:
+                sec = sec_upper
+            else:
+                # Unknown section in CR profile -> treat as no section
+                sec = None
 
     notice = Notice(
         title=payload.title.strip(),
@@ -75,7 +89,7 @@ def create_notice_by_cr(db: Session, payload: CRNoticeCreate, cr: CR) -> Notice:
         created_by_cr_id=str(cr.id),
         created_by_teacher_id=None,
         dept=str(dept),
-        sec=str(sec),
+        sec=sec,
         series=str(series),
     )
 
@@ -160,18 +174,61 @@ def get_student_notices(db: Session, student: Student, skip: int = 0, limit: int
     sec = getattr(student, "section", None) or getattr(student, "sec", None)
     series = getattr(student, "series", None)
 
-    if not (dept and sec and series):
+    if not (dept and series):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student profile missing dept/sec/series",
+            detail="Student profile missing dept/series",
         )
+
+    sec_norm = None
+    if isinstance(sec, str):
+        cleaned = sec.strip()
+        if cleaned != "" and cleaned.lower() not in {"none", "null"}:
+            sec_upper = cleaned.upper()
+            sec_norm = sec_upper if sec_upper in {"A", "B", "C"} else None
 
     return (
         db.query(Notice)
         .filter(
             Notice.dept == str(dept),
-            Notice.sec == str(sec),
             Notice.series == str(series),
+            or_(Notice.sec == sec_norm, Notice.sec.is_(None)),
+        )
+        .order_by(desc(Notice.created_at))
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+# -------------------------
+# CR FEED (teacher notices by dept/sec/series)
+# -------------------------
+def get_cr_feed_teacher_notices(db: Session, cr: CR, skip: int = 0, limit: int = 50) -> list[Notice]:
+    dept = getattr(cr, "dept", None)
+    sec = getattr(cr, "section", None) or getattr(cr, "sec", None)
+    series = getattr(cr, "series", None)
+
+    if not (dept and series):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CR profile missing dept/series",
+        )
+
+    sec_norm = None
+    if isinstance(sec, str):
+        cleaned = sec.strip()
+        if cleaned != "" and cleaned.lower() not in {"none", "null"}:
+            sec_upper = cleaned.upper()
+            sec_norm = sec_upper if sec_upper in {"A", "B", "C"} else None
+
+    return (
+        db.query(Notice)
+        .filter(
+            Notice.created_by_role == "teacher",
+            Notice.dept == str(dept),
+            Notice.series == str(series),
+            or_(Notice.sec == sec_norm, Notice.sec.is_(None)),
         )
         .order_by(desc(Notice.created_at))
         .offset(skip)
@@ -261,16 +318,20 @@ def update_teacher_notice(db: Session, teacher: Teacher, notice_id: str, payload
         notice.notice_message = payload.notice_message.strip()
         updated = True
 
-    if payload.dept is not None:
-        notice.dept = str(payload.dept)
+    # Allow explicit null updates: payload.model_fields_set tracks which fields were provided.
+    fields_set = getattr(payload, "model_fields_set", set())
+
+    if "dept" in fields_set:
+        notice.dept = str(payload.dept) if payload.dept is not None else notice.dept
         updated = True
 
-    if payload.sec is not None:
-        notice.sec = str(payload.sec)
+    if "sec" in fields_set:
+        # payload.sec is already normalized by schema validator (None / A / B / C)
+        notice.sec = payload.sec
         updated = True
 
-    if payload.series is not None:
-        notice.series = str(payload.series)
+    if "series" in fields_set:
+        notice.series = str(payload.series) if payload.series is not None else notice.series
         updated = True
 
     # ✅ re-generate embeddings only if something changed

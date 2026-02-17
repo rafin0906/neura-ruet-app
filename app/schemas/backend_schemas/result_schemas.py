@@ -5,6 +5,30 @@ from datetime import datetime
 from uuid import UUID
 
 
+def _normalize_course_code(value: str) -> str:
+    if value is None:
+        raise ValueError("course_code is required")
+    cleaned = str(value).strip().upper()
+    cleaned = cleaned.replace(" ", "").replace("_", "-")
+    # Ensure a single hyphen between dept and number when possible
+    if "-" not in cleaned and len(cleaned) >= 7:
+        cleaned = f"{cleaned[:3]}-{cleaned[3:]}"
+    return cleaned
+
+
+def _normalize_section(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned == "" or cleaned.lower() in {"none", "null"}:
+            return None
+        cleaned_upper = cleaned.upper()
+        if cleaned_upper in {"A", "B", "C"}:
+            return cleaned_upper
+    raise ValueError("Section must be A, B, C or None")
+
+
 # -----------------------------
 # Result Entry Schemas
 # -----------------------------
@@ -43,7 +67,7 @@ class ResultEntryResponse(ResultEntryBase):
 # Result Sheet Schemas
 # -----------------------------
 class ResultSheetBase(BaseModel):
-    ct_no: Optional[int] = Field(None, ge=1)
+    ct_no: int = Field(..., ge=1)
     course_code: str = Field(..., min_length=2, max_length=50)
     course_name: str = Field(..., min_length=2, max_length=120)
 
@@ -67,6 +91,10 @@ class ResultSheetBase(BaseModel):
             raise ValueError(f"Department must be one of {allowed_depts}")
         return value.upper()
 
+    @field_validator("course_code")
+    def validate_course_code(cls, value):
+        return _normalize_course_code(value)
+
     @field_validator("series")
     def validate_series(cls, value):
         if value is None:
@@ -77,13 +105,58 @@ class ResultSheetBase(BaseModel):
 
     @field_validator("section")
     def validate_section(cls, value):
-        if value not in (None, "A", "B", "C"):
-            raise ValueError("Section must be A, B, C or None")
-        return value
+        return _normalize_section(value)
 
 
 class ResultSheetCreate(ResultSheetBase):
     pass
+
+
+class ResultSheetUpdate(BaseModel):
+    ct_no: Optional[int] = Field(None, ge=1)
+    course_code: Optional[str] = Field(None, min_length=2, max_length=50)
+    course_name: Optional[str] = Field(None, min_length=2, max_length=120)
+
+    dept: Optional[str] = Field(None, min_length=2, max_length=20)
+    section: Optional[str] = None
+    series: Optional[int] = None
+
+    starting_roll: Optional[str] = None
+    ending_roll: Optional[str] = None
+
+    @field_validator("dept")
+    @classmethod
+    def validate_dept(cls, value):
+        if value is None:
+            return value
+        allowed_depts = [
+            "EEE","CSE","ETE","ECE","CE","URP",
+            "ARCH","BECM","ME","IPE","CME","MTE","MSE","CHE"
+        ]
+        if value.upper() not in allowed_depts:
+            raise ValueError(f"Department must be one of {allowed_depts}")
+        return value.upper()
+
+    @field_validator("course_code")
+    @classmethod
+    def validate_course_code(cls, value):
+        if value is None:
+            return value
+        return _normalize_course_code(value)
+
+    @field_validator("series")
+    @classmethod
+    def validate_series(cls, value):
+        if value is None:
+            return value
+        if value < 19 or value > 25:
+            raise ValueError("Series must be between 19 and 25")
+        return value
+
+    @field_validator("section")
+    @classmethod
+    def validate_section(cls, value):
+        return _normalize_section(value)
 
 
 class ResultSheetResponse(ResultSheetBase):

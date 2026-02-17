@@ -2,6 +2,19 @@ from pydantic import BaseModel, EmailStr, constr, field_validator
 from typing import Optional
 from typing_extensions import Literal
 
+
+def _normalize_section(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned == "" or cleaned.lower() in {"none", "null"}:
+            return None
+        cleaned_upper = cleaned.upper()
+        if cleaned_upper in {"A", "B", "C"}:
+            return cleaned_upper
+    raise ValueError("Section must be A, B, C or None")
+
 class StudentBaseSchema(BaseModel):
     full_name: Optional[str] = None
     roll_no: Optional[str] = None
@@ -34,9 +47,7 @@ class StudentBaseSchema(BaseModel):
 
     @field_validator("section")
     def validate_section(cls, value):
-        if value not in (None, "A", "B", "C"):
-            raise ValueError("Section must be A, B, C or None")
-        return value
+        return _normalize_section(value)
 
 
 class StudentLoginSchema(BaseModel):
@@ -49,7 +60,7 @@ class StudentSchema(StudentBaseSchema):
     series: int
     email: EmailStr
     mobile_no: str
-    section: str
+    section: Optional[str] = None
 
 
 class StudentProfileSetupMeResponse(BaseModel):

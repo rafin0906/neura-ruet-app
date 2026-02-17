@@ -25,7 +25,7 @@ class LectureSlide(Base):
     topic = Column(String, nullable=False)
 
     dept = Column(String, nullable=False)
-    sec = Column(String, nullable=False)
+    sec = Column(String, nullable=True)
     series = Column(String, nullable=False)
 
     uploaded_by_cr_id = Column(

@@ -26,7 +26,7 @@ class LectureSlideResponse(BaseModel):
     uploaded_by_cr_id: str
 
     dept: str
-    sec: str
+    sec: Optional[str] = None
     series: str
 
     created_at: datetime

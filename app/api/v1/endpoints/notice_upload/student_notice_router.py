@@ -10,7 +10,7 @@ from app.models.student_models import Student
 router = APIRouter(prefix="/student/notices", tags=["Notices (Student)"])
 
 
-@router.get("", response_model=list[NoticeResponse])
+@router.get("/feed", response_model=list[NoticeResponse])
 def get_notices_for_student(
     student: Student = Depends(get_current_student),
     db: Session = Depends(get_db),

@@ -28,7 +28,7 @@ class ClassNote(Base):
     written_by = Column(String, nullable=False)
 
     dept = Column(String, nullable=False)
-    sec = Column(String, nullable=False)
+    sec = Column(String, nullable=True)
     series = Column(String, nullable=False)
 
     # ✅ REAL FK (same pattern as ChatRoom.owner_cr_id)

@@ -250,10 +250,11 @@ def profile_setup(
         "profile_image",
     )
 
+    # Use model_fields_set so clients can explicitly clear fields by sending null
+    fields_set = getattr(payload, "model_fields_set", set())
     for field in updatable:
-        val = getattr(payload, field, None)
-        if val is not None:
-            setattr(student, field, val)
+        if field in fields_set:
+            setattr(student, field, getattr(payload, field))
 
     # 🔒 invalidate setup token only if it exists
     if student.setup_token:

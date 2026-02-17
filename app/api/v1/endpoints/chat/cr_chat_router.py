@@ -1,8 +1,11 @@
 from datetime import datetime
 from typing import List
+import traceback
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from app.ai.llm_client import GroqClient
+from app.services.ai_chat_service import run_tool_chat
 
 from app.db.database import get_db
 from app.models.chat_room_models import ChatRoom, SenderRole
@@ -20,6 +23,20 @@ from app.services.chat_service import _get_cr_room_or_404
 router = APIRouter(prefix="/crs/chat", tags=["CR Chat"])
 
 
+def _auto_title_from_text(text: str, max_len: int = 60) -> str:
+    text = " ".join((text or "").strip().split())
+    if not text:
+        return "New chat"
+    if len(text) <= max_len:
+        return text
+    cut = text[:max_len]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut + "…"
+
+
+
+
 @router.post("/rooms", response_model=ChatRoomOut, status_code=status.HTTP_201_CREATED)
 def create_room(
     payload: ChatRoomCreateIn,
@@ -29,7 +46,7 @@ def create_room(
     room = ChatRoom(
         owner_role=SenderRole.cr,
         owner_cr_id=str(cr.id),
-        title=payload.title,
+        title=(payload.title.strip() if payload.title and payload.title.strip() else "New Chat"),
     )
     db.add(room)
     db.commit()

@@ -15,18 +15,18 @@ class CRBaseSchema(StudentBaseSchema):
 
         allowed = ["cr-1", "cr-2", "cr-3"]
 
-        cr = value.strip().lower()   # normalize
+        cr = value.strip().lower()  # normalize
         if cr not in allowed:
             raise ValueError(f"cr_no must be one of {allowed}")
 
-        return cr   # always saved as "cr-1"/"cr-2"/"cr-3"
+        return cr  # always saved as "cr-1"/"cr-2"/"cr-3"
 
 
 class CRSchema(CRBaseSchema):
 
     full_name: str
     dept: str
-    section: Literal["A", "B", "C"]
+    section: Optional[str] = None
     series: int
 
     mobile_no: str

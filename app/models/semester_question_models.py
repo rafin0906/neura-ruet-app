@@ -35,7 +35,7 @@ class SemesterQuestion(Base):
     year = Column(Integer, nullable=False)  # ✅ exam year (e.g., 2021)
 
     dept = Column(String, nullable=False)
-    sec = Column(String, nullable=False)
+    sec = Column(String, nullable=True)
     series = Column(String, nullable=False)
 
     uploaded_by_cr_id = Column(

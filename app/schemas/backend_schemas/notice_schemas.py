@@ -1,6 +1,22 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional,Literal
+from typing import Optional, Literal
 from datetime import datetime
+
+
+def _normalize_section(value: Optional[str]) -> Optional[str]:
+    # Accept None/null and also common "None" string variants.
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned == "":
+            return None
+        if cleaned.lower() in {"none", "null"}:
+            return None
+        cleaned_upper = cleaned.upper()
+        if cleaned_upper in {"A", "B", "C"}:
+            return cleaned_upper
+    raise ValueError("Section must be A, B, C or None")
 
 
 class TeacherNoticeCreate(BaseModel):
@@ -8,7 +24,7 @@ class TeacherNoticeCreate(BaseModel):
     notice_message: str = Field(..., min_length=1)
 
     dept: str
-    sec: str
+    sec: Optional[str] = None
     series: str
 
     @field_validator("dept")
@@ -40,11 +56,7 @@ class TeacherNoticeCreate(BaseModel):
 
     @field_validator("sec")
     def validate_section(cls, value):
-        if value not in (None, "A", "B", "C"):
-            raise ValueError("Section must be A, B, C or None")
-        return value
-
-        return value
+        return _normalize_section(value)
 
 class CRNoticeCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
@@ -61,7 +73,7 @@ class NoticeResponse(BaseModel):
     created_by_cr_id: Optional[str] = None
 
     dept: str
-    sec: str
+    sec: Optional[str] = None
     series: str
 
     created_at: datetime
@@ -79,6 +91,11 @@ class TeacherNoticeUpdate(BaseModel):
     dept: Optional[str] = None
     sec: Optional[str] = None
     series: Optional[str] = None
+
+    @field_validator("sec")
+    def validate_section(cls, value):
+        # allow explicit null + allow sending "None"
+        return _normalize_section(value)
 
 
 class CRNoticeUpdate(BaseModel):

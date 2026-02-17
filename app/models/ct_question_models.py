@@ -34,7 +34,7 @@ class CTQuestion(Base):
     ct_no = Column(Integer, nullable=False)  # ✅ CT number
 
     dept = Column(String, nullable=False)
-    sec = Column(String, nullable=False)
+    sec = Column(String, nullable=True)
     series = Column(String, nullable=False)
 
     uploaded_by_cr_id = Column(

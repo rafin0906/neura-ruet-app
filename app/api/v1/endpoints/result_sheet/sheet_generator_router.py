@@ -14,6 +14,7 @@ from app.models.result_entry_models import ResultEntry
 
 from app.schemas.backend_schemas.result_schemas import (
     ResultSheetCreate,
+    ResultSheetUpdate,
     ResultSheetResponse,
     ResultSheetBatchUpload,
     ResultSheetWithEntriesResponse,
@@ -146,3 +147,77 @@ def list_result_sheets_history(
         .all()
     )
     return sheets
+
+
+@router.patch("/{sheet_id}", response_model=ResultSheetResponse)
+def update_result_sheet(
+    sheet_id: UUID,
+    payload: ResultSheetUpdate,
+    db: Session = Depends(get_db),
+    teacher=Depends(get_current_teacher),
+):
+    sheet_id_str = str(sheet_id)
+
+    sheet = get_teacher_sheet_or_404(db, sheet_id_str, str(teacher.id))
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        return sheet
+
+    next_ct_no = updates.get("ct_no", sheet.ct_no)
+    next_course_code = updates.get("course_code", sheet.course_code)
+    next_course_name = updates.get("course_name", sheet.course_name)
+    next_dept = updates.get("dept", sheet.dept)
+    next_section = updates.get("section", sheet.section)
+    next_series = updates.get("series", int(sheet.series) if sheet.series is not None else None)
+
+    next_starting_roll = updates.get("starting_roll", sheet.starting_roll)
+    next_ending_roll = updates.get("ending_roll", sheet.ending_roll)
+
+    # uniqueness conflict check (same as create, but exclude self)
+    exists = (
+        db.query(ResultSheet.id)
+        .filter(
+            ResultSheet.id != sheet_id_str,
+            ResultSheet.created_by_teacher_id == str(teacher.id),
+            ResultSheet.dept == next_dept,
+            ResultSheet.section == next_section,
+            ResultSheet.series == str(next_series),
+            ResultSheet.course_code == next_course_code,
+            ResultSheet.ct_no == next_ct_no,
+        )
+        .first()
+    )
+    if exists:
+        raise HTTPException(
+            status_code=409,
+            detail="Result sheet already exists for this course and CT no.",
+        )
+
+    # apply updates
+    sheet.ct_no = next_ct_no
+    sheet.course_code = next_course_code
+    sheet.course_name = next_course_name
+    sheet.dept = next_dept
+    sheet.section = next_section
+    sheet.series = str(next_series)
+    sheet.starting_roll = next_starting_roll
+    sheet.ending_roll = next_ending_roll
+
+    # regenerate title to keep history correct
+    sheet.title = generate_result_sheet_title(
+        ResultSheetCreate(
+            ct_no=next_ct_no,
+            course_code=next_course_code,
+            course_name=next_course_name,
+            dept=next_dept,
+            section=next_section,
+            series=next_series,
+            starting_roll=next_starting_roll,
+            ending_roll=next_ending_roll,
+        )
+    )
+
+    db.add(sheet)
+    db.commit()
+    db.refresh(sheet)
+    return sheet
