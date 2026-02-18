@@ -34,6 +34,72 @@ _cached_project_id: str | None = None
 _cached_service_account_info: dict[str, Any] | None = None
 
 
+_logged_firebase_creds_source: bool = False
+
+
+def _log_firebase_creds_source_once() -> None:
+    """Log which Firebase credentials source is used (safe: no secrets).
+
+    This is mainly for production debugging (e.g., Render env var not set / wrong key deployed).
+    """
+
+    global _logged_firebase_creds_source
+    if _logged_firebase_creds_source:
+        return
+    _logged_firebase_creds_source = True
+
+    try:
+        info = _service_account_info()
+        if info:
+            logger.info(
+                "Firebase creds source=env project_id=%s client_email=%s private_key_id=%s",
+                str(info.get("project_id") or ""),
+                str(info.get("client_email") or ""),
+                str(info.get("private_key_id") or ""),
+            )
+            return
+
+        path = _service_account_file()
+        logger.info("Firebase creds source=file path=%s", path)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            logger.info(
+                "Firebase creds file project_id=%s client_email=%s private_key_id=%s",
+                str(data.get("project_id") or ""),
+                str(data.get("client_email") or ""),
+                str(data.get("private_key_id") or ""),
+            )
+        except Exception:
+            # Don't fail push due to logging.
+            logger.info("Firebase creds file could not be read for diagnostics")
+    except Exception:
+        # Best-effort diagnostics only.
+        return
+
+
+def _normalize_service_account_info(info: dict[str, Any]) -> dict[str, Any]:
+    """Normalize common deployment formatting issues.
+
+    Most common production issue for "invalid_grant: Invalid JWT Signature" is that
+    the service account private_key is injected via env var with literal "\\n"
+    instead of real newlines.
+    """
+
+    if not isinstance(info, dict):
+        return info
+
+    pk = info.get("private_key")
+    if isinstance(pk, str):
+        pk_str = pk.strip().strip('"')
+        # If the key contains literal backslash-n sequences, convert to newlines.
+        if "\\n" in pk_str and "\n" not in pk_str:
+            pk_str = pk_str.replace("\\n", "\n")
+        info["private_key"] = pk_str
+
+    return info
+
+
 def _service_account_info() -> dict[str, Any] | None:
     """Return service account JSON loaded from env vars, if provided.
 
@@ -54,11 +120,15 @@ def _service_account_info() -> dict[str, Any] | None:
     try:
         if raw_b64:
             decoded = base64.b64decode(raw_b64).decode("utf-8")
-            _cached_service_account_info = json.loads(decoded)
+            _cached_service_account_info = _normalize_service_account_info(
+                json.loads(decoded)
+            )
             return _cached_service_account_info
 
         if raw:
-            _cached_service_account_info = json.loads(raw)
+            _cached_service_account_info = _normalize_service_account_info(
+                json.loads(raw)
+            )
             return _cached_service_account_info
     except Exception as e:
         raise RuntimeError(
@@ -87,6 +157,8 @@ def _get_project_id() -> str:
     if _cached_project_id:
         return _cached_project_id
 
+    _log_firebase_creds_source_once()
+
     info = _service_account_info()
     if info:
         project_id = info.get("project_id")
@@ -114,6 +186,8 @@ def _get_project_id() -> str:
 
 def _get_access_token() -> str:
     global _cached_access_token, _cached_access_token_expiry_ts
+
+    _log_firebase_creds_source_once()
 
     now = time.time()
     # Refresh a bit early.
@@ -144,7 +218,20 @@ def _get_access_token() -> str:
                     "Set FIREBASE_SERVICE_ACCOUNT_JSON_B64 (preferred) or FIREBASE_SERVICE_ACCOUNT_JSON, "
                     "or set FIREBASE_SERVICE_ACCOUNT_FILE/GOOGLE_APPLICATION_CREDENTIALS to a readable JSON file path."
                 ) from e
-        credentials.refresh(GoogleAuthRequest())
+        try:
+            credentials.refresh(GoogleAuthRequest())
+        except Exception as e:
+            # Surface the most common causes with an actionable message.
+            msg = str(e)
+            if "invalid_grant" in msg.lower() or "invalid jwt signature" in msg.lower():
+                raise RuntimeError(
+                    "Firebase credentials refresh failed (invalid_grant / Invalid JWT Signature). "
+                    "This usually means the service account key is wrong/revoked OR the private_key is misformatted "
+                    "(common when injected via env vars with literal \\n instead of real newlines). "
+                    "Prefer setting FIREBASE_SERVICE_ACCOUNT_JSON_B64 to the exact service-account JSON, or set "
+                    "GOOGLE_APPLICATION_CREDENTIALS/FIREBASE_SERVICE_ACCOUNT_FILE to a JSON file path."
+                ) from e
+            raise
 
         if not credentials.token or not credentials.expiry:
             raise RuntimeError("Failed to obtain Firebase access token")
@@ -266,7 +353,7 @@ def _get_notice_sender_name(db: Session, notice: Notice) -> str:
 
 async def _send_fcm_message(
     token: str, *, title: str, body: str, data: dict[str, str]
-) -> bool:
+) -> bool | None:
     project_id = _get_project_id()
     url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
     access_token = _get_access_token()
@@ -308,6 +395,15 @@ async def _send_fcm_message(
         logger.info("FCM token unregistered/invalid; will deactivate")
         return False
 
+    # Auth/config issues: do NOT deactivate tokens.
+    if resp.status_code in {401, 403}:
+        logger.error(
+            "FCM auth/permission error status=%s body=%s",
+            resp.status_code,
+            (text[:2000] + "…") if len(text) > 2000 else text,
+        )
+        return None
+
     # For all other errors, return False so callers can treat it as failure and we log the reason.
     # This helps diagnose common issues like SENDER_ID_MISMATCH / PROJECT_NOT_PERMITTED.
     logger.warning(
@@ -315,7 +411,7 @@ async def _send_fcm_message(
         resp.status_code,
         (text[:2000] + "…") if len(text) > 2000 else text,
     )
-    return False
+    return None
 
 
 async def _send_notice_push_async(db: Session, notice: Notice) -> None:
@@ -358,8 +454,8 @@ async def _send_notice_push_async(db: Session, notice: Notice) -> None:
 
     async def _send_one(t: str) -> None:
         async with semaphore:
-            ok = await _send_fcm_message(t, title=title, body=body, data=data)
-            if not ok:
+            result = await _send_fcm_message(t, title=title, body=body, data=data)
+            if result is False:
                 logger.info(
                     "Push: deactivating token prefix=%s",
                     (t[:20] + "...") if isinstance(t, str) else "<non-str>",
