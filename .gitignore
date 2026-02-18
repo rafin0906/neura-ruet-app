@@ -50,3 +50,7 @@ mediafiles/
 build/
 dist/
 *.egg-info/
+
+
+# Google/Firebase service account key (never commit)
+**/service_account_key.json

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -30,13 +31,54 @@ _token_lock = threading.Lock()
 _cached_access_token: str | None = None
 _cached_access_token_expiry_ts: float = 0.0
 _cached_project_id: str | None = None
+_cached_service_account_info: dict[str, Any] | None = None
+
+
+def _service_account_info() -> dict[str, Any] | None:
+    """Return service account JSON loaded from env vars, if provided.
+
+    Supported env vars:
+    - FIREBASE_SERVICE_ACCOUNT_JSON: raw JSON string
+    - FIREBASE_SERVICE_ACCOUNT_JSON_B64: base64-encoded JSON string (safer for multi-line values)
+
+    If neither is set, returns None and callers can fall back to file-based loading.
+    """
+
+    global _cached_service_account_info
+    if _cached_service_account_info is not None:
+        return _cached_service_account_info
+
+    raw_b64 = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON_B64", "").strip()
+    raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+
+    try:
+        if raw_b64:
+            decoded = base64.b64decode(raw_b64).decode("utf-8")
+            _cached_service_account_info = json.loads(decoded)
+            return _cached_service_account_info
+
+        if raw:
+            _cached_service_account_info = json.loads(raw)
+            return _cached_service_account_info
+    except Exception as e:
+        raise RuntimeError(
+            "Invalid Firebase service account JSON in FIREBASE_SERVICE_ACCOUNT_JSON(_B64)"
+        ) from e
+
+    _cached_service_account_info = None
+    return None
 
 
 def _service_account_file() -> str:
     # Default: backend/service_account_key.json
-    return os.getenv(
-        "FIREBASE_SERVICE_ACCOUNT_FILE",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "service_account_key.json"),
+    default_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+        "service_account_key.json",
+    )
+    return (
+        os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE")
+        or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        or default_path
     )
 
 
@@ -45,9 +87,24 @@ def _get_project_id() -> str:
     if _cached_project_id:
         return _cached_project_id
 
+    info = _service_account_info()
+    if info:
+        project_id = info.get("project_id")
+        if not project_id:
+            raise RuntimeError("Firebase service account JSON missing project_id")
+        _cached_project_id = str(project_id)
+        return _cached_project_id
+
     path = _service_account_file()
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "Firebase service account credentials not configured. "
+            "Set FIREBASE_SERVICE_ACCOUNT_JSON_B64 (preferred) or FIREBASE_SERVICE_ACCOUNT_JSON, "
+            "or set FIREBASE_SERVICE_ACCOUNT_FILE/GOOGLE_APPLICATION_CREDENTIALS to a readable JSON file path."
+        ) from e
     project_id = data.get("project_id")
     if not project_id:
         raise RuntimeError("Firebase service account JSON missing project_id")
@@ -68,10 +125,25 @@ def _get_access_token() -> str:
         if _cached_access_token and (_cached_access_token_expiry_ts - 60) > now:
             return _cached_access_token
 
-        credentials = service_account.Credentials.from_service_account_file(
-            _service_account_file(),
-            scopes=[FIREBASE_MESSAGING_SCOPE],
-        )
+        info = _service_account_info()
+        if info:
+            credentials = service_account.Credentials.from_service_account_info(
+                info,
+                scopes=[FIREBASE_MESSAGING_SCOPE],
+            )
+        else:
+            path = _service_account_file()
+            try:
+                credentials = service_account.Credentials.from_service_account_file(
+                    path,
+                    scopes=[FIREBASE_MESSAGING_SCOPE],
+                )
+            except FileNotFoundError as e:
+                raise RuntimeError(
+                    "Firebase service account credentials not configured. "
+                    "Set FIREBASE_SERVICE_ACCOUNT_JSON_B64 (preferred) or FIREBASE_SERVICE_ACCOUNT_JSON, "
+                    "or set FIREBASE_SERVICE_ACCOUNT_FILE/GOOGLE_APPLICATION_CREDENTIALS to a readable JSON file path."
+                ) from e
         credentials.refresh(GoogleAuthRequest())
 
         if not credentials.token or not credentials.expiry:
@@ -114,28 +186,22 @@ def _select_recipient_tokens_for_notice(db: Session, notice: Notice) -> list[str
 
     # Teacher notice -> students + CR
     if sender_role == "teacher":
-        q_students = (
-            db.query(DeviceToken.token)
-            .filter(
-                DeviceToken.is_active.is_(True),
-                DeviceToken.platform == "android",
-                DeviceToken.owner_role == DeviceOwnerRole.student,
-                DeviceToken.dept == dept,
-                DeviceToken.series == series,
-            )
+        q_students = db.query(DeviceToken.token).filter(
+            DeviceToken.is_active.is_(True),
+            DeviceToken.platform == "android",
+            DeviceToken.owner_role == DeviceOwnerRole.student,
+            DeviceToken.dept == dept,
+            DeviceToken.series == series,
         )
         if sec is not None:
             q_students = q_students.filter(DeviceToken.sec == sec)
 
-        q_crs = (
-            db.query(DeviceToken.token)
-            .filter(
-                DeviceToken.is_active.is_(True),
-                DeviceToken.platform == "android",
-                DeviceToken.owner_role == DeviceOwnerRole.cr,
-                DeviceToken.dept == dept,
-                DeviceToken.series == series,
-            )
+        q_crs = db.query(DeviceToken.token).filter(
+            DeviceToken.is_active.is_(True),
+            DeviceToken.platform == "android",
+            DeviceToken.owner_role == DeviceOwnerRole.cr,
+            DeviceToken.dept == dept,
+            DeviceToken.series == series,
         )
         if sec is not None:
             q_crs = q_crs.filter(DeviceToken.sec == sec)
@@ -145,15 +211,12 @@ def _select_recipient_tokens_for_notice(db: Session, notice: Notice) -> list[str
 
     # CR notice -> students
     elif sender_role == "cr":
-        q_students = (
-            db.query(DeviceToken.token)
-            .filter(
-                DeviceToken.is_active.is_(True),
-                DeviceToken.platform == "android",
-                DeviceToken.owner_role == DeviceOwnerRole.student,
-                DeviceToken.dept == dept,
-                DeviceToken.series == series,
-            )
+        q_students = db.query(DeviceToken.token).filter(
+            DeviceToken.is_active.is_(True),
+            DeviceToken.platform == "android",
+            DeviceToken.owner_role == DeviceOwnerRole.student,
+            DeviceToken.dept == dept,
+            DeviceToken.series == series,
         )
         if sec is not None:
             q_students = q_students.filter(DeviceToken.sec == sec)
@@ -201,7 +264,9 @@ def _get_notice_sender_name(db: Session, notice: Notice) -> str:
     return ""
 
 
-async def _send_fcm_message(token: str, *, title: str, body: str, data: dict[str, str]) -> bool:
+async def _send_fcm_message(
+    token: str, *, title: str, body: str, data: dict[str, str]
+) -> bool:
     project_id = _get_project_id()
     url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
     access_token = _get_access_token()
@@ -235,7 +300,11 @@ async def _send_fcm_message(token: str, *, title: str, body: str, data: dict[str
     lowered = text.lower()
 
     # UNREGISTERED / invalid token -> allow caller to deactivate.
-    if ("unregistered" in lowered) or ("registration token" in lowered) or ("notregistered" in lowered):
+    if (
+        ("unregistered" in lowered)
+        or ("registration token" in lowered)
+        or ("notregistered" in lowered)
+    ):
         logger.info("FCM token unregistered/invalid; will deactivate")
         return False
 
@@ -291,20 +360,42 @@ async def _send_notice_push_async(db: Session, notice: Notice) -> None:
         async with semaphore:
             ok = await _send_fcm_message(t, title=title, body=body, data=data)
             if not ok:
-                logger.info("Push: deactivating token prefix=%s", (t[:20] + "...") if isinstance(t, str) else "<non-str>")
+                logger.info(
+                    "Push: deactivating token prefix=%s",
+                    (t[:20] + "...") if isinstance(t, str) else "<non-str>",
+                )
                 deactivate_token(db, t)
 
     await asyncio.gather(*[_send_one(t) for t in tokens])
 
 
-def send_notice_push_by_id(notice_id: str) -> None:
+async def _send_notice_push_by_id_async(notice_id: str) -> None:
     db = SessionLocal()
     try:
         notice = db.query(Notice).filter(Notice.id == str(notice_id)).first()
         if not notice:
             return
-        asyncio.run(_send_notice_push_async(db, notice))
-    except Exception:
-        logger.exception("Failed to send notice push")
+        await _send_notice_push_async(db, notice)
     finally:
         db.close()
+
+
+def _log_task_result(task: asyncio.Task[None]) -> None:
+    try:
+        task.result()
+    except Exception:
+        logger.exception("Failed to send notice push")
+
+
+def send_notice_push_by_id(notice_id: str) -> None:
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(_send_notice_push_by_id_async(notice_id))
+            return
+
+        task = loop.create_task(_send_notice_push_by_id_async(notice_id))
+        task.add_done_callback(_log_task_result)
+    except Exception:
+        logger.exception("Failed to send notice push")
