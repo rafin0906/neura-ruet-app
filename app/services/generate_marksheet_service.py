@@ -193,7 +193,8 @@ async def run_generate_marksheet_pipeline(
 
     # 8) return download URL with formatted success message
     # In production, MUST ADD Hosting Server URL before the download path, e.g.:
-    download_url = f"https://yourdomain.com/downloads/{filename}"
+    # download_url = f"https://yourdomain.com/downloads/{filename}"
+    download_url = f"https://neura-ruet-app.onrender.com/downloads/{filename}"
     # download_url = f"/downloads/{filename}"
 
     return (
