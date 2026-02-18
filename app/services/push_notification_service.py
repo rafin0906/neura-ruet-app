@@ -389,13 +389,16 @@ def _log_task_result(task: asyncio.Task[None]) -> None:
 
 def send_notice_push_by_id(notice_id: str) -> None:
     try:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            asyncio.run(_send_notice_push_by_id_async(notice_id))
-            return
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
 
-        task = loop.create_task(_send_notice_push_by_id_async(notice_id))
-        task.add_done_callback(_log_task_result)
-    except Exception:
-        logger.exception("Failed to send notice push")
+    if loop is None:
+        try:
+            asyncio.run(_send_notice_push_by_id_async(notice_id))
+        except Exception:
+            logger.exception("Failed to send notice push")
+        return
+
+    task = loop.create_task(_send_notice_push_by_id_async(notice_id))
+    task.add_done_callback(_log_task_result)
