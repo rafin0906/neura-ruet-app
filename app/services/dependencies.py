@@ -157,3 +157,54 @@ def get_current_cr(
     return cr
 
 
+def get_current_actor(
+    credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
+    db: Session = Depends(get_db),
+):
+    """Return the current authenticated actor (role + model instance)."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    token = _get_bearer_token(credentials, credentials_exception)
+    payload = verify_access_token(token, credentials_exception)
+
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Access token required")
+
+    if payload.get("neura_id"):
+        neura_id = payload.get("neura_id")
+        student = db.query(Student).filter(Student.neura_id == neura_id).first()
+        if not student:
+            raise credentials_exception
+        token_ver = payload.get("token_version")
+        if token_ver is None or token_ver != student.token_version:
+            raise HTTPException(status_code=401, detail="Token has been revoked")
+        return {"role": "student", "user": student}
+
+    if payload.get("neura_teacher_id"):
+        neura_teacher_id = payload.get("neura_teacher_id")
+        teacher = db.query(Teacher).filter(Teacher.neura_teacher_id == neura_teacher_id).first()
+        if not teacher:
+            raise credentials_exception
+        token_ver = payload.get("token_version")
+        if token_ver is None or token_ver != teacher.token_version:
+            raise HTTPException(status_code=401, detail="Token has been revoked")
+        return {"role": "teacher", "user": teacher}
+
+    if payload.get("neura_cr_id"):
+        neura_cr_id = payload.get("neura_cr_id")
+        cr = db.query(CR).filter(CR.neura_cr_id == neura_cr_id).first()
+        if not cr:
+            raise credentials_exception
+        token_ver = payload.get("token_version")
+        if token_ver is None or token_ver != cr.token_version:
+            raise HTTPException(status_code=401, detail="Token has been revoked")
+        return {"role": "cr", "user": cr}
+
+    raise credentials_exception
+
+
+

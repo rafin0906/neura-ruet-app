@@ -18,6 +18,8 @@ from app.api.v1.endpoints.material_upload import cr_ct_question_router
 from app.api.v1.endpoints.material_upload import cr_lecture_slide_router
 from app.api.v1.endpoints.material_upload import cr_semester_question_router
 
+from app.api.v1.endpoints.push_notifications import push_router
+
 from app.api.v1.endpoints.update_password import update_password
 
 api_router = APIRouter()
@@ -37,6 +39,8 @@ api_router.include_router(cr_ct_question_router.router)
 api_router.include_router(cr_lecture_slide_router.router)
 api_router.include_router(cr_semester_question_router.router)
 api_router.include_router(update_password.router)
+
+api_router.include_router(push_router.router)
 
 
 

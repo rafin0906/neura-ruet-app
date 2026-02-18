@@ -63,6 +63,7 @@ from app.models import (
     result_sheet_models,
     result_entry_models,
     semester_question_models,
+    device_token_models,
 )
 
 target_metadata = Base.metadata

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -17,6 +17,7 @@ from app.services.notice_service import (
     delete_teacher_notice,
 )
 from app.models.teacher_models import Teacher
+from app.services.push_notification_service import send_notice_push_by_id
 
 router = APIRouter(prefix="/teacher/notices", tags=["Notices (Teacher)"])
 
@@ -26,6 +27,7 @@ def upload_notice_teacher(
     payload: TeacherNoticeCreate,
     teacher: Teacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = None,
 ):
     """
     Creates a notice by Teacher.
@@ -34,7 +36,9 @@ def upload_notice_teacher(
     - created_by_role = "teacher"
     - vector embeddings generated and stored
     """
-    return create_notice_by_teacher(db=db, payload=payload, teacher=teacher)
+    notice = create_notice_by_teacher(db=db, payload=payload, teacher=teacher)
+    background_tasks.add_task(send_notice_push_by_id, str(notice.id))
+    return notice
 
 
 @router.get("", response_model=List[NoticeResponse])
@@ -62,6 +66,7 @@ def update_my_notice_teacher(
     payload: TeacherNoticeUpdate,
     teacher: Teacher = Depends(get_current_teacher),
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = None,
 ):
     """
     Updates a Teacher notice.
@@ -70,7 +75,10 @@ def update_my_notice_teacher(
     - fields updated selectively
     - vector embeddings re-generated if content/targeting changed
     """
-    return update_teacher_notice(db=db, teacher=teacher, notice_id=notice_id, payload=payload)
+    notice = update_teacher_notice(db=db, teacher=teacher, notice_id=notice_id, payload=payload)
+    if background_tasks is not None:
+        background_tasks.add_task(send_notice_push_by_id, str(notice.id))
+    return notice
 
 
 @router.delete("/{notice_id}", status_code=status.HTTP_204_NO_CONTENT)

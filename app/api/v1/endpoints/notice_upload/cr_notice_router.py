@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -18,6 +18,7 @@ from app.services.notice_service import (
     delete_cr_notice,
 )
 from app.models.cr_models import CR
+from app.services.push_notification_service import send_notice_push_by_id
 
 router = APIRouter(prefix="/cr/notices", tags=["Notices (CR)"])
 
@@ -27,6 +28,7 @@ def upload_notice_cr(
     payload: CRNoticeCreate,
     cr: CR = Depends(get_current_cr),
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = None,
 ):
     """
     Creates a notice by CR.
@@ -36,7 +38,9 @@ def upload_notice_cr(
     - created_by_role = "cr"
     - vector embeddings generated and stored
     """
-    return create_notice_by_cr(db=db, payload=payload, cr=cr)
+    notice = create_notice_by_cr(db=db, payload=payload, cr=cr)
+    background_tasks.add_task(send_notice_push_by_id, str(notice.id))
+    return notice
 
 
 @router.get("", response_model=List[NoticeResponse])
@@ -75,6 +79,7 @@ def update_my_notice_cr(
     payload: CRNoticeUpdate,
     cr: CR = Depends(get_current_cr),
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = None,
 ):
     """
     Updates a CR notice.
@@ -83,7 +88,10 @@ def update_my_notice_cr(
     - fields updated selectively
     - vector embeddings re-generated if content changed
     """
-    return update_cr_notice(db=db, cr=cr, notice_id=notice_id, payload=payload)
+    notice = update_cr_notice(db=db, cr=cr, notice_id=notice_id, payload=payload)
+    if background_tasks is not None:
+        background_tasks.add_task(send_notice_push_by_id, str(notice.id))
+    return notice
 
 
 @router.delete("/{notice_id}", status_code=status.HTTP_204_NO_CONTENT)
