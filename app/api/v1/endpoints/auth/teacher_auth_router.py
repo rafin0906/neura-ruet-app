@@ -7,7 +7,7 @@ import jwt
 import os
 import random
 import secrets
-import smtplib
+import resend
 from email.message import EmailMessage
 from datetime import datetime, timedelta
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
@@ -19,7 +19,10 @@ from app.schemas.backend_schemas.teacher_schema import (
     TeacherSchema,
     TeacherProfileSetupMeResponse,
 )
-from app.schemas.backend_schemas.utils_schema import ForgetPasswordSchema, ResetPasswordSchema
+from app.schemas.backend_schemas.utils_schema import (
+    ForgetPasswordSchema,
+    ResetPasswordSchema,
+)
 
 from app.utils.hashing import (
     get_password_hash,
@@ -116,30 +119,26 @@ def teacher_forget_password(
     subject = "Your password reset OTP"
     body = f"Your password reset OTP is: {otp}. It will expire in 10 minutes."
 
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = os.getenv("SMTP_FROM", "no-reply@example.com")
-    msg["To"] = payload.email
-    msg.set_content(body)
-
-    smtp_host = os.getenv("SMTP_HOST")
-    if smtp_host:
-        smtp_port = int(os.getenv("SMTP_PORT", "587"))
-        smtp_user = os.getenv("SMTP_USER")
-        smtp_pass = os.getenv("SMTP_PASS")
+    # Use Resend (HTTPS) when configured; fall back to logging otherwise.
+    resend_api_key = os.getenv("RESEND_API_KEY")
+    if resend_api_key:
+        resend.api_key = resend_api_key
         try:
-            with smtplib.SMTP(smtp_host, smtp_port) as server:
-                server.starttls()
-                if smtp_user and smtp_pass:
-                    server.login(smtp_user, smtp_pass)
-                server.send_message(msg)
-                logger.info("Sent OTP email to %s", payload.email)
+            resend.Emails.send(
+                {
+                    "from": "onboarding@resend.dev",
+                    "to": payload.email,
+                    "subject": subject,
+                    "text": body,
+                }
+            )
+            logger.info("Sent OTP email to %s via Resend", payload.email)
         except Exception:
-            logger.exception("Failed to send OTP email")
+            logger.exception("Failed to send OTP email via Resend")
             raise HTTPException(status_code=500, detail="Failed to send OTP email")
     else:
         logger.info(
-            "SMTP not configured; OTP generated for %s (masked=%s)",
+            "Resend not configured; OTP generated for %s (masked=%s)",
             payload.email,
             _mask_otp(otp),
         )
@@ -290,7 +289,9 @@ def teacher_refresh_access_token(
 ):
     # 0) refresh token from Authorization: Bearer <refresh_token>
     if not credentials:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authorization header missing")
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Authorization header missing"
+        )
 
     refresh_token = credentials.credentials
 
@@ -324,7 +325,10 @@ def teacher_refresh_access_token(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
     # 5) refresh token expiry check
-    if not teacher.refresh_token_expires_at or datetime.utcnow() > teacher.refresh_token_expires_at:
+    if (
+        not teacher.refresh_token_expires_at
+        or datetime.utcnow() > teacher.refresh_token_expires_at
+    ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token expired")
 
     # 6) bind refresh to the expired access token + token_version
@@ -350,7 +354,9 @@ def teacher_refresh_access_token(
 
     teacher.refresh_token_id = new_refresh_token_id
     teacher.refresh_token_hash = hash_refresh_token(new_refresh_token)
-    teacher.refresh_token_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    teacher.refresh_token_expires_at = datetime.utcnow() + timedelta(
+        days=REFRESH_TOKEN_EXPIRE_DAYS
+    )
 
     db.commit()
     db.refresh(teacher)
@@ -361,7 +367,6 @@ def teacher_refresh_access_token(
         "refresh_token_id": new_refresh_token_id,
         "token_type": "bearer",
     }
-
 
 
 @router.post("/logout")

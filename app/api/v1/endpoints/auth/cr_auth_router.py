@@ -7,7 +7,7 @@ import jwt
 import os
 import random
 import secrets
-import smtplib
+import resend
 from email.message import EmailMessage
 from datetime import datetime, timedelta
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
@@ -115,30 +115,26 @@ def cr_forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_
     subject = "Your password reset OTP"
     body = f"Your password reset OTP is: {otp}. It will expire in 10 minutes."
 
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = os.getenv("SMTP_FROM", "no-reply@example.com")
-    msg["To"] = payload.email
-    msg.set_content(body)
-
-    smtp_host = os.getenv("SMTP_HOST")
-    if smtp_host:
-        smtp_port = int(os.getenv("SMTP_PORT", "587"))
-        smtp_user = os.getenv("SMTP_USER")
-        smtp_pass = os.getenv("SMTP_PASS")
+    # Use Resend (HTTPS) when configured; fall back to logging otherwise.
+    resend_api_key = os.getenv("RESEND_API_KEY")
+    if resend_api_key:
+        resend.api_key = resend_api_key
         try:
-            with smtplib.SMTP(smtp_host, smtp_port) as server:
-                server.starttls()
-                if smtp_user and smtp_pass:
-                    server.login(smtp_user, smtp_pass)
-                server.send_message(msg)
-                logger.info("Sent OTP email to %s", payload.email)
+            resend.Emails.send(
+                {
+                    "from": "onboarding@resend.dev",
+                    "to": payload.email,
+                    "subject": subject,
+                    "text": body,
+                }
+            )
+            logger.info("Sent OTP email to %s via Resend", payload.email)
         except Exception:
-            logger.exception("Failed to send OTP email")
+            logger.exception("Failed to send OTP email via Resend")
             raise HTTPException(status_code=500, detail="Failed to send OTP email")
     else:
         logger.info(
-            "SMTP not configured; OTP generated for %s (masked=%s)",
+            "Resend not configured; OTP generated for %s (masked=%s)",
             payload.email,
             _mask_otp(otp),
         )
