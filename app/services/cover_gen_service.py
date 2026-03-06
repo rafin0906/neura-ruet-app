@@ -163,8 +163,7 @@ async def run_cover_generator_pipeline(
     raw_type = await llm.complete(
         system_prompt=COVER_TYPE_JSON_PROMPT,
         messages=history + [{"role": "user", "content": user_text}],
-        # Keep json_mode disabled here because the WRONG-TOOL GUARD may return a plain sentence.
-        json_mode=False,
+        json_mode=True,
         temperature=0.0,
         max_tokens=120,
     )
@@ -172,7 +171,7 @@ async def run_cover_generator_pipeline(
         type_data = _safe_parse_json(raw_type)
     except Exception as e:
         logger.error(f"Error parsing cover type JSON: {e}")
-        return raw_type
+        return "I couldn't understand which cover type you want. Please say: lab report, assignment, or report."
 
     cover_type = (type_data.get("cover_type") or "").strip()
 

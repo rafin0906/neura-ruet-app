@@ -34,7 +34,9 @@ def to_llm_history(msgs: List[Message]) -> List[Dict[str, str]]:
     return out
 
 
-async def gate_intent(llm: GroqClient, user_text: str, history: List[Dict[str, str]]) -> Tuple[str, str]:
+async def gate_intent(
+    llm: GroqClient, user_text: str, history: List[Dict[str, str]]
+) -> Tuple[str, str]:
     raw = await llm.complete(
         system_prompt=TOOL_GATE_JSON_PROMPT,
         messages=history + [{"role": "user", "content": user_text}],
@@ -75,27 +77,32 @@ async def run_tool_chat(
     last_msgs = fetch_last_messages(db, room_id, limit=6)
     history = to_llm_history(last_msgs)
 
-    intent, _reason = await gate_intent(llm, user_text, history)
+    # If the client explicitly selected a tool (the normal mobile UI path), do NOT let the
+    # intent gate override that selection. The gate is only useful for an "auto" tool mode.
+    use_gate = not tool_name or str(tool_name).strip().lower() == "auto"
 
-    # 1) general chat
-    if intent == "general_chat":
-        return await llm.complete(
-            system_prompt=GENERAL_CHAT_PROMPT,
-            messages=history + [{"role": "user", "content": user_text}],
-            json_mode=False,
-            temperature=0.5,
-            max_tokens=300,
-        )
+    if use_gate:
+        intent, _reason = await gate_intent(llm, user_text, history)
 
-    # 2) blocked
-    if intent == "blocked":
-        return await llm.complete(
-            system_prompt=BLOCKED_PROMPT,
-            messages=history + [{"role": "user", "content": user_text}],
-            json_mode=False,
-            temperature=0.2,
-            max_tokens=220,
-        )
+        # 1) general chat
+        if intent == "general_chat":
+            return await llm.complete(
+                system_prompt=GENERAL_CHAT_PROMPT,
+                messages=history + [{"role": "user", "content": user_text}],
+                json_mode=False,
+                temperature=0.5,
+                max_tokens=300,
+            )
+
+        # 2) blocked
+        if intent == "blocked":
+            return await llm.complete(
+                system_prompt=BLOCKED_PROMPT,
+                messages=history + [{"role": "user", "content": user_text}],
+                json_mode=False,
+                temperature=0.2,
+                max_tokens=220,
+            )
 
     # 3) tool query -> run the tool
     tool = get_tool(tool_name)

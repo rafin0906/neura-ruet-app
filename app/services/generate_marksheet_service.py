@@ -75,7 +75,10 @@ async def run_generate_marksheet_pipeline(
     # a 'mode':'ask' response (e.g., "Sorry, this request does not fall under the marksheet generation tool's scope.").
     try:
         logger.debug("generate_marksheet: llm raw response: %s", raw)
-        logger.debug("generate_marksheet: history+user_text: %s", history + [{"role": "user", "content": user_text}])
+        logger.debug(
+            "generate_marksheet: history+user_text: %s",
+            history + [{"role": "user", "content": user_text}],
+        )
     except Exception:
         # Avoid raising in production if logging fails
         pass
@@ -83,10 +86,19 @@ async def run_generate_marksheet_pipeline(
     try:
         data = json.loads(raw)
     except Exception:
-        raise HTTPException(status_code=400, detail="Failed to parse marksheet request JSON.")
+        raise HTTPException(
+            status_code=400, detail="Failed to parse marksheet request JSON."
+        )
 
-    if data.get("mode") == "ask":
+    mode = (data.get("mode") or "").strip()
+    if mode == "ask":
         return data.get("question", "Please provide missing info.")
+    if mode in ("out_of_scope", "wrong_tool"):
+        return (
+            data.get("message")
+            or data.get("question")
+            or "Sorry, this request does not fall under the marksheet generation tool's scope."
+        )
 
     # 2) validate fields
     # section is OPTIONAL: if absent/empty, we'll try to infer it from matching sheets.
@@ -115,16 +127,27 @@ async def run_generate_marksheet_pipeline(
             ResultSheet.created_by_teacher_id == teacher_id,
             ResultSheet.dept == dept,
             ResultSheet.series == series,
-            func.regexp_replace(func.upper(ResultSheet.course_code), r"[^A-Z0-9]", "", "g") == course_key,
+            func.regexp_replace(
+                func.upper(ResultSheet.course_code), r"[^A-Z0-9]", "", "g"
+            )
+            == course_key,
             ResultSheet.ct_no.in_(ct_list),
         )
     )
 
     if section:
-        sheets: List[ResultSheet] = base_query.filter(ResultSheet.section == section).all()
+        sheets: List[ResultSheet] = base_query.filter(
+            ResultSheet.section == section
+        ).all()
     else:
         sheets = base_query.all()
-        sections_found = sorted({(s.section or "").upper().strip() for s in sheets if getattr(s, "section", None)})
+        sections_found = sorted(
+            {
+                (s.section or "").upper().strip()
+                for s in sheets
+                if getattr(s, "section", None)
+            }
+        )
         if len(sections_found) > 1:
             return "Which section is this marksheet for? (A/B/C)"
         if len(sections_found) == 1:
@@ -143,7 +166,11 @@ async def run_generate_marksheet_pipeline(
     for s in sheets:
         for e in s.entries:
             marks_batch_entries.append(
-                {"roll_no": str(e.roll_no), "ct_no": int(s.ct_no), "marks": str(e.marks)}
+                {
+                    "roll_no": str(e.roll_no),
+                    "ct_no": int(s.ct_no),
+                    "marks": str(e.marks),
+                }
             )
 
     # 5) pick course_name from any sheet
@@ -159,7 +186,9 @@ async def run_generate_marksheet_pipeline(
     all_rolls = [_safe_int(e["roll_no"]) for e in marks_batch_entries]
     all_rolls = [r for r in all_rolls if r is not None]
 
-    from_roll = _safe_int(sheets[0].starting_roll) or (min(all_rolls) if all_rolls else 0)
+    from_roll = _safe_int(sheets[0].starting_roll) or (
+        min(all_rolls) if all_rolls else 0
+    )
     to_roll = _safe_int(sheets[0].ending_roll) or (max(all_rolls) if all_rolls else 0)
 
     # --- base directories ---
@@ -175,7 +204,9 @@ async def run_generate_marksheet_pipeline(
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     ct_range = "_".join(map(str, sorted(ct_list)))
 
-    filename = f"{course}_CT-{ct_range}_{dept_safe}-{series_safe}-{section_safe}_{ts}.pdf"
+    filename = (
+        f"{course}_CT-{ct_range}_{dept_safe}-{series_safe}-{section_safe}_{ts}.pdf"
+    )
     output_path = PDF_DIR / filename
 
     # 7) generate pdf

@@ -100,7 +100,6 @@ Do NOT answer the question.
 """
 
 
-
 MATERIAL_TYPE_JSON_PROMPT = """
 You are a strict JSON classifier.
 
@@ -260,24 +259,7 @@ Style:
 
 
 COVER_TYPE_JSON_PROMPT = """
-WRONG-TOOL GUARD (HIGHEST PRIORITY):
-You are running inside the "generate_cover_page" tool.
-
-If the user's request is about STUDY MATERIALS (examples: class notes, slides, ppt, pdf, CT questions, semester/final questions, question bank, drive link),
-then you MUST NOT generate any cover page and you MUST NOT answer with materials.
-
-In that case, output ONLY this single sentence and nothing else:
-"This is a study materials request. Please use the Find Materials tool."
-
-If the user's request is about NOTICES/ANNOUNCEMENTS/UPDATES (examples: notice, announcement, circular, routine, schedule, deadline, "latest", today, yesterday, tomorrow, this week),
-then you MUST NOT generate any cover page.
-
-In that case, output ONLY this single sentence and nothing else:
-"This is a notices/announcements request. Please use the View Notices tool."
-
-Otherwise, proceed normally with cover-page info collection.
-
-You are a strict cover-type detector for RUET cover generation.
+You are a strict JSON cover-type detector for RUET cover page generation.
 
 You must decide the cover type from EXACTLY these:
 - "lab_report"
@@ -294,7 +276,10 @@ Return ONLY valid JSON:
 
 Rules:
 - Do NOT invent. If unclear -> cover_type="ask".
-- confidence must be 0 to 1.
+- confidence must be between 0 and 1.
+
+Important disambiguation:
+- Users may mention "pdf"/"ppt" just because they want a generated file. That does NOT mean they are requesting study materials.
 
 Detection hints:
 - lab_report keywords: "lab", "lab report", "experiment", "exp", "practical", "sessional", "sdl", "lab work", "lab class"
@@ -307,7 +292,6 @@ Disambiguation:
 - If contains "assignment"/"ass" -> assignment
 - If contains "report" and NOT lab keywords -> report
 """
-
 
 
 COVER_INFO_JSON_PROMPT = """
@@ -519,34 +503,8 @@ Examples of good responses:
 
 
 MARKSHEET_JSON_PROMPT = """
-WRONG-TOOL GUARD (HIGHEST PRIORITY):
-You are running inside the "generate_marksheet" tool. This tool is ONLY for generating CT/exam marksheets in PDF format.
-
-If the user is asking for ANY of the following, IMMEDIATELY respond with mode="ask" and question="Sorry, this request does not fall under the marksheet generation tool's scope.":
-
-❌ Finding materials (notes, slides, PDFs, CT questions, semester questions, final questions, question banks, drive links, study materials)
-❌ Viewing notices, announcements, or updates
-❌ Generating cover pages (lab reports, assignments, reports)
-❌ Checking individual marks or results
-❌ Any other request unrelated to generating CT/exam marksheets
-
-DO NOT suggest which tool they should use. DO NOT be helpful about redirecting them. Simply state it's out of scope.
-
----
-
-ACTUAL TASK (only if request is about generating marksheet):
-Extract marksheet generation parameters from the conversation
-
-Return ONLY this JSON:
-{
-  "mode": "wrong_tool",
-  "message": "This is the Generate Marksheet tool. Based on your request, you should use: [suggest the appropriate tool from: Find Materials]"
-}
-
-Otherwise, return ONLY valid JSON in ONE of these forms:
-
-
 You are a strict JSON extractor for the NeuraRUET tool: generate_marksheet (TEACHER ONLY).
+This tool generates CT marksheets (PDF) from already-uploaded result sheets.
 
 Return ONLY valid JSON in ONE of these forms:
 
@@ -565,6 +523,12 @@ CLARIFY:
   "mode": "ask",
   "question": "Ask for the missing info in 1 short line.",
   "missing_fields": ["dept", "series", "course_code", "ct_no"]
+}
+
+OUT OF SCOPE:
+{
+  "mode": "out_of_scope",
+  "message": "Sorry, this request does not fall under the marksheet generation tool's scope."
 }
 
 Rules:
@@ -620,7 +584,6 @@ ct_no (MUST be list of integers):
 
 General:
 - If anything is missing/unclear → mode="ask" (do NOT guess).
+- If the user is not asking to generate a marksheet, return mode="out_of_scope".
 - Output JSON only. No extra text.
 """
-
-
