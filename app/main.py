@@ -21,6 +21,7 @@ from app.models.chat_room_models import ChatRoom, SenderRole
 from app.models.message_models import Message
 from app.models.result_sheet_models import ResultSheet
 from app.models.result_entry_models import ResultEntry
+from fastapi.middleware.cors import CORSMiddleware
 
 
 from app.api.v1.api import api_router
@@ -29,6 +30,17 @@ from app.ai.tools_init import init_tools
 # Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 init_tools()
 
 # Include the API router
