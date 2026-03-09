@@ -7,8 +7,8 @@ from app.utils.logger import logger
 
 
 def get_default_from_address() -> str:
-    # Prefer RESEND_FROM, then SMTP_FROM, then a sensible default.
-    return os.getenv("RESEND_FROM") or os.getenv("SMTP_FROM") or "auth@neuraruet.tech"
+   
+    return "auth@neuraruet.tech"
 
 
 def _normalize_from_address(from_address: str) -> str:
