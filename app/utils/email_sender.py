@@ -7,7 +7,7 @@ from app.utils.logger import logger
 
 
 def get_default_from_address() -> str:
-   
+
     return "auth@neuraruet.tech"
 
 
@@ -16,12 +16,43 @@ def _normalize_from_address(from_address: str) -> str:
     if not from_address:
         from_address = get_default_from_address()
 
-    # Resend accepts either "Name <email@domain>" or "email@domain".
-    # If caller gives a bare email, add a neutral display name.
-    if "<" not in from_address and ">" not in from_address and "@" in from_address:
-        return f"NeuraRUET <{from_address}>"
+    # Extract bare email address from possible formats like 'Name <email>'.
+    raw = None
+    if "<" in from_address and ">" in from_address:
+        start = from_address.find("<") + 1
+        end = from_address.find(">", start)
+        raw = from_address[start:end].strip()
+    elif "@" in from_address:
+        raw = from_address.strip()
 
-    return from_address
+    # If we couldn't extract an email, fall back to default.
+    if not raw:
+        raw = get_default_from_address()
+
+    # If the caller supplied a public/free email domain (gmail, yahoo, etc.),
+    # override it to the verified default to avoid Resend 403 errors.
+    if _is_public_email_domain(raw):
+        logger.warning("Rejecting public from-address %s; using verified default", raw)
+        raw = get_default_from_address()
+
+    # Always return with a proper display name.
+    return f"NeuraRUET <{raw}>"
+
+
+def _is_public_email_domain(email: str) -> bool:
+    if not email or "@" not in email:
+        return True
+    domain = email.rsplit("@", 1)[1].lower()
+    public = {
+        "gmail.com",
+        "googlemail.com",
+        "yahoo.com",
+        "outlook.com",
+        "hotmail.com",
+        "live.com",
+        "icloud.com",
+    }
+    return domain in public
 
 
 def _normalize_to(to: str | Sequence[str]) -> list[str]:

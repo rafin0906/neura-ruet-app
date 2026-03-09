@@ -142,7 +142,7 @@ def teacher_forget_password(
     except Exception:
         raise HTTPException(
             status_code=500,
-            detail="Failed to send OTP email via Resend. Check RESEND_API_KEY and RESEND_FROM.",
+            detail="Failed to send OTP email",
         )
 
     return {"message": "OTP sent to your email"}

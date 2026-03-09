@@ -142,7 +142,7 @@ def forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_db)
     except Exception:
         raise HTTPException(
             status_code=500,
-            detail="Failed to send OTP email via Resend. Check RESEND_API_KEY and RESEND_FROM.",
+            detail="Failed to send OTP email",
         )
 
     # logger.info("Sanitized OTP store after send: %s", sanitize_otp_store())
