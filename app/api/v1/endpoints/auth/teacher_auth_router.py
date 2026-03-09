@@ -46,6 +46,13 @@ refresh_bearer = HTTPBearer(auto_error=False)
 router = APIRouter(prefix="/teachers", tags=["Teachers"])
 
 
+# Configurable From address for outgoing OTP emails. Prefer RESEND_FROM,
+# fallback to SMTP_FROM, then a sensible default on our auth subdomain.
+FROM_ADDRESS = os.getenv(
+    "RESEND_FROM", os.getenv("SMTP_FROM", "no-reply@auth.neuraruet.tech")
+)
+
+
 def _mask_otp(otp: str) -> str:
     if not otp or len(otp) < 2:
         return "**"
@@ -126,7 +133,7 @@ def teacher_forget_password(
         try:
             resend.Emails.send(
                 {
-                    "from": "onboarding@resend.dev",
+                    "from": FROM_ADDRESS,
                     "to": payload.email,
                     "subject": subject,
                     "text": body,

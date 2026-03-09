@@ -78,6 +78,13 @@ def cleanup_expired_otps() -> None:
         del otp_store[email]
 
 
+# Configurable From address for outgoing OTP emails. Prefer RESEND_FROM,
+# fallback to SMTP_FROM, then a sensible default on our auth subdomain.
+FROM_ADDRESS = os.getenv(
+    "RESEND_FROM", os.getenv("SMTP_FROM", "no-reply@auth.neuraruet.tech")
+)
+
+
 @router.post("/login")
 def cr_login(payload: CRLoginSchema, db: Session = Depends(get_db)):
     cr = db.query(CR).filter(CR.neura_cr_id == payload.neura_cr_id).first()
@@ -122,7 +129,7 @@ def cr_forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_
         try:
             resend.Emails.send(
                 {
-                    "from": "onboarding@resend.dev",
+                    "from": FROM_ADDRESS,
                     "to": payload.email,
                     "subject": subject,
                     "text": body,

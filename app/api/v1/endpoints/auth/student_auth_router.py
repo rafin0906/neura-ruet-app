@@ -74,6 +74,13 @@ def cleanup_expired_otps() -> None:
         del otp_store[email]
 
 
+# Configurable From address for outgoing OTP emails. Prefer RESEND_FROM,
+# fall back to SMTP_FROM, then a sensible default on our auth subdomain.
+FROM_ADDRESS = os.getenv(
+    "RESEND_FROM", os.getenv("SMTP_FROM", "no-reply@auth.neuraruet.tech")
+)
+
+
 router = APIRouter(prefix="/students", tags=["Students"])
 
 
@@ -120,7 +127,7 @@ def forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_db)
 
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = os.getenv("SMTP_FROM", "no-reply@example.com")
+    msg["From"] = FROM_ADDRESS
     msg["To"] = payload.email
     msg.set_content(body)
     # Use Resend (HTTPS) when configured; fall back to logging otherwise.
@@ -130,7 +137,7 @@ def forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_db)
         try:
             resend.Emails.send(
                 {
-                    "from": "onboarding@resend.dev",
+                    "from": FROM_ADDRESS,
                     "to": payload.email,
                     "subject": subject,
                     "text": body,
