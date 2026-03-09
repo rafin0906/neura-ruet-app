@@ -81,7 +81,7 @@ def cleanup_expired_otps() -> None:
 # Configurable From address for outgoing OTP emails. Prefer RESEND_FROM,
 # fallback to SMTP_FROM, then a sensible default on our auth subdomain.
 FROM_ADDRESS = os.getenv(
-    "RESEND_FROM", os.getenv("SMTP_FROM", "no-reply@auth.neuraruet.tech")
+    "RESEND_FROM", os.getenv("SMTP_FROM", "auth@neuraruet.tech")
 )
 
 
