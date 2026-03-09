@@ -7,8 +7,6 @@ import jwt
 import os
 import random
 import secrets
-import resend
-from email.message import EmailMessage
 from datetime import datetime, timedelta
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 
@@ -31,6 +29,7 @@ from app.utils.hashing import (
     verify_password,
 )
 from app.utils.logger import logger
+from app.utils.email_sender import send_text_email
 from app.services.profile_set_up_dependencies import get_cr_for_profile_setup
 from app.services.dependencies import (
     create_access_token,
@@ -80,9 +79,7 @@ def cleanup_expired_otps() -> None:
 
 # Configurable From address for outgoing OTP emails. Prefer RESEND_FROM,
 # fallback to SMTP_FROM, then a sensible default on our auth subdomain.
-FROM_ADDRESS = os.getenv(
-    "RESEND_FROM", os.getenv("SMTP_FROM", "auth@neuraruet.tech")
-)
+FROM_ADDRESS = os.getenv("RESEND_FROM", os.getenv("SMTP_FROM", "auth@neuraruet.tech"))
 
 
 @router.post("/login")
@@ -122,30 +119,27 @@ def cr_forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_
     subject = "Your password reset OTP"
     body = f"Your password reset OTP is: {otp}. It will expire in 10 minutes."
 
-    # Use Resend (HTTPS) when configured; fall back to logging otherwise.
-    resend_api_key = os.getenv("RESEND_API_KEY")
-    if resend_api_key:
-        resend.api_key = resend_api_key
-        try:
-            resend.Emails.send(
-                {
-                    "from": FROM_ADDRESS,
-                    "to": payload.email,
-                    "subject": subject,
-                    "text": body,
-                }
-            )
-            logger.info("Sent OTP email to %s via Resend", payload.email)
-        except Exception:
-            logger.exception("Failed to send OTP email via Resend")
-            raise HTTPException(status_code=500, detail="Failed to send OTP email")
-    else:
-        logger.info(
-            "Resend not configured; OTP generated for %s (masked=%s)",
-            payload.email,
-            _mask_otp(otp),
+    try:
+        resp = send_text_email(
+            to=payload.email,
+            subject=subject,
+            text=body,
+            from_address=FROM_ADDRESS,
         )
-        logger.debug("Full OTP for %s: %s", payload.email, otp)
+        if resp is not None:
+            logger.info("Sent OTP email to %s via Resend", payload.email)
+        else:
+            logger.info(
+                "Resend not configured; OTP generated for %s (masked=%s)",
+                payload.email,
+                _mask_otp(otp),
+            )
+            logger.debug("Full OTP for %s: %s", payload.email, otp)
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to send OTP email via Resend. Check RESEND_API_KEY and RESEND_FROM.",
+        )
 
     return {"message": "OTP sent to your email"}
 
