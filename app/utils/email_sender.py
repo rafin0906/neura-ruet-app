@@ -70,12 +70,30 @@ def _normalize_to(to: str | Sequence[str]) -> list[str]:
     return normalized
 
 
+def render_template(template_filename: str, context: dict) -> str:
+    """Simple template renderer: loads file from ../templates and replaces {{KEY}} placeholders."""
+    base = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "templates"))
+    path = os.path.join(base, template_filename)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except FileNotFoundError:
+        raise
+
+    for k, v in context.items():
+        placeholder = "{{" + k + "}}"
+        content = content.replace(placeholder, str(v))
+
+    return content
+
+
 def send_text_email(
     *,
     to: str | Sequence[str],
     subject: str,
     text: str,
     from_address: str | None = None,
+    html: str | None = None,
 ) -> dict | None:
     """Send a plaintext email using Resend when configured.
 
@@ -105,6 +123,10 @@ def send_text_email(
         "subject": subject,
         "text": text,
     }
+
+    # include HTML part if provided
+    if html is not None:
+        payload["html"] = html
 
     try:
         resp = resend.Emails.send(payload)

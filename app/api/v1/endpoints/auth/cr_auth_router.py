@@ -29,7 +29,7 @@ from app.utils.hashing import (
     verify_password,
 )
 from app.utils.logger import logger
-from app.utils.email_sender import send_text_email
+from app.utils.email_sender import send_text_email, render_template
 from app.services.profile_set_up_dependencies import get_cr_for_profile_setup
 from app.services.dependencies import (
     create_access_token,
@@ -119,11 +119,22 @@ def cr_forget_password(payload: ForgetPasswordSchema, db: Session = Depends(get_
     subject = "Your password reset OTP"
     body = f"Your password reset OTP is: {otp}. It will expire in 10 minutes."
 
+    # render HTML template and send both text + html
     try:
+        html = render_template(
+            "otp_email.html",
+            {
+                "OTP_CODE": otp,
+                "RESET_LINK": os.getenv("FRONTEND_URL", "#")
+                + f"/reset-password?email={payload.email}&otp={otp}",
+            },
+        )
+
         resp = send_text_email(
             to=payload.email,
             subject=subject,
             text=body,
+            html=html,
             from_address=FROM_ADDRESS,
         )
         if resp is not None:
