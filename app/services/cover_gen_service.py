@@ -286,7 +286,7 @@ async def run_cover_generator_pipeline(
 
     # In production, MUST ADD Hosting Server URL before the download path, e.g.:
     # download_url = f"https://yourdomain.com/downloads/{filename}" for letter use
-    download_url = f"https://neura-ruet-app.onrender.com/downloads/{filename}"
+    download_url = f"http://167.71.197.228:8000/downloads/{filename}"
     # download_url = f"/downloads/{filename}"
 
     return (
